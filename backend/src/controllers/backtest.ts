@@ -4,6 +4,7 @@ import { asyncHandler, createError } from '../middleware/errorHandler'
 import { authenticate, AuthRequest } from '../middleware/auth'
 import BacktestService, { BacktestRequest } from '../services/backtest/BacktestService'
 import logger from '../utils/logger'
+import { errorMessage } from '../utils/errors'
 
 const backtestService = new BacktestService()
 
@@ -91,7 +92,7 @@ export class BacktestController {
       try {
         const backtestId = await backtestService.startBacktest(request)
         
-        res.status(201).json({
+        return res.status(201).json({
           success: true,
           message: '回测任务已启动',
           data: {
@@ -101,10 +102,10 @@ export class BacktestController {
         })
       } catch (error) {
         logger.error('启动回测失败:', error)
-        res.status(500).json({
+        return res.status(500).json({
           success: false,
           message: '启动回测失败',
-          error: error.message
+          error: errorMessage(error)
         })
       }
     })
@@ -119,23 +120,23 @@ export class BacktestController {
       try {
         const backtest = await backtestService.getBacktest(id, req.user!.id)
         
-        res.json({
+        return res.json({
           success: true,
           data: { backtest }
         })
       } catch (error) {
-        if (error.message === '回测不存在或无权限访问') {
+        if (errorMessage(error) === '回测不存在或无权限访问') {
           return res.status(404).json({
             success: false,
-            message: error.message
+            message: errorMessage(error)
           })
         }
         
         logger.error('获取回测详情失败:', error)
-        res.status(500).json({
+        return res.status(500).json({
           success: false,
           message: '获取回测详情失败',
-          error: error.message
+          error: errorMessage(error)
         })
       }
     })
@@ -171,16 +172,16 @@ export class BacktestController {
           strategyId
         })
         
-        res.json({
+        return res.json({
           success: true,
           data: result
         })
       } catch (error) {
         logger.error('获取回测列表失败:', error)
-        res.status(500).json({
+        return res.status(500).json({
           success: false,
           message: '获取回测列表失败',
-          error: error.message
+          error: errorMessage(error)
         })
       }
     })
@@ -211,23 +212,23 @@ export class BacktestController {
           limit
         })
         
-        res.json({
+        return res.json({
           success: true,
           data: result
         })
       } catch (error) {
-        if (error.message === '回测不存在或无权限访问') {
+        if (errorMessage(error) === '回测不存在或无权限访问') {
           return res.status(404).json({
             success: false,
-            message: error.message
+            message: errorMessage(error)
           })
         }
         
         logger.error('获取回测交易记录失败:', error)
-        res.status(500).json({
+        return res.status(500).json({
           success: false,
           message: '获取回测交易记录失败',
-          error: error.message
+          error: errorMessage(error)
         })
       }
     })
@@ -242,23 +243,26 @@ export class BacktestController {
       try {
         await backtestService.cancelBacktest(id, req.user!.id)
         
-        res.json({
+        return res.json({
           success: true,
           message: '回测已取消'
         })
       } catch (error) {
-        if (error.message === '回测不存在或无权限访问' || error.message === '只能取消正在运行的回测') {
+        if (
+          errorMessage(error) === '回测不存在或无权限访问' ||
+          errorMessage(error) === '只能取消正在运行的回测'
+        ) {
           return res.status(400).json({
             success: false,
-            message: error.message
+            message: errorMessage(error)
           })
         }
         
         logger.error('取消回测失败:', error)
-        res.status(500).json({
+        return res.status(500).json({
           success: false,
           message: '取消回测失败',
-          error: error.message
+          error: errorMessage(error)
         })
       }
     })
@@ -273,23 +277,23 @@ export class BacktestController {
       try {
         await backtestService.deleteBacktest(id, req.user!.id)
         
-        res.json({
+        return res.json({
           success: true,
           message: '回测已删除'
         })
       } catch (error) {
-        if (error.message === '回测不存在或无权限访问') {
+        if (errorMessage(error) === '回测不存在或无权限访问') {
           return res.status(404).json({
             success: false,
-            message: error.message
+            message: errorMessage(error)
           })
         }
         
         logger.error('删除回测失败:', error)
-        res.status(500).json({
+        return res.status(500).json({
           success: false,
           message: '删除回测失败',
-          error: error.message
+          error: errorMessage(error)
         })
       }
     })
@@ -302,16 +306,16 @@ export class BacktestController {
       try {
         const stats = await backtestService.getBacktestStats(req.user!.id)
         
-        res.json({
+        return res.json({
           success: true,
           data: { stats }
         })
       } catch (error) {
         logger.error('获取回测统计失败:', error)
-        res.status(500).json({
+        return res.status(500).json({
           success: false,
           message: '获取回测统计失败',
-          error: error.message
+          error: errorMessage(error)
         })
       }
     })
@@ -364,16 +368,16 @@ export class BacktestController {
           }
         ]
 
-        res.json({
+        return res.json({
           success: true,
           data: { templates }
         })
       } catch (error) {
         logger.error('获取回测模板失败:', error)
-        res.status(500).json({
+        return res.status(500).json({
           success: false,
           message: '获取回测模板失败',
-          error: error.message
+          error: errorMessage(error)
         })
       }
     })

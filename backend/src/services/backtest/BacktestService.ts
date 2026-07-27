@@ -1,6 +1,7 @@
 import { PrismaClient, Strategy, Backtest, MarketData, Trade } from '@prisma/client'
 import BacktestEngine, { BacktestConfig, BacktestResult } from './BacktestEngine'
 import logger from '../../utils/logger'
+import { errorMessage } from '../../utils/errors'
 
 const prisma = new PrismaClient()
 
@@ -50,15 +51,15 @@ export class BacktestService {
       const backtest = await prisma.backtest.create({
         data: {
           name: request.name,
-          description: request.description || '',
           strategyId: request.strategyId,
           userId: request.userId,
           startDate: request.startDate,
           endDate: request.endDate,
           initialCapital: request.initialCapital,
-          symbols: request.symbols,
           status: 'pending',
           parameters: {
+            description: request.description || '',
+            symbols: request.symbols,
             commission: request.commission || 0.001,
             slippage: request.slippage || 0.001,
             leverage: request.leverage || 1,
@@ -163,7 +164,7 @@ export class BacktestService {
       if (abortSignal.aborted) {
         await this.updateBacktestStatus(backtestId, 'cancelled', '回测已取消')
       } else {
-        await this.updateBacktestStatus(backtestId, 'failed', error.message)
+        await this.updateBacktestStatus(backtestId, 'failed', errorMessage(error))
         throw error
       }
     } finally {
@@ -280,10 +281,10 @@ export class BacktestService {
       await prisma.backtest.update({
         where: { id: backtestId },
         data: {
-          status,
-          currentStep
+          status
         }
       })
+      logger.info(`[${backtestId}] ${currentStep}`)
     } catch (error) {
       logger.error('更新回测状态失败:', error)
     }
@@ -295,13 +296,7 @@ export class BacktestService {
     currentStep: string
   ): Promise<void> {
     try {
-      await prisma.backtest.update({
-        where: { id: backtestId },
-        data: {
-          progress,
-          currentStep
-        }
-      })
+      logger.debug(`[${backtestId}] ${progress.toFixed(1)}%: ${currentStep}`)
     } catch (error) {
       logger.error('更新回测进度失败:', error)
     }

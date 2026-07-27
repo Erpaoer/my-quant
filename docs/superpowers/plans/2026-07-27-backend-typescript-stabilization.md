@@ -30,12 +30,12 @@ data routes (19), and real-time trading (15). Backend tests currently pass 20/20
 
 ### Task 3: Reconcile Prisma schema and runtime service assumptions
 
-- [ ] Run `prisma validate` and regenerate the client from the checked-in schema.
-- [ ] Inventory every missing Prisma model/field diagnostic by service.
-- [ ] Treat the checked-in schema as the persistence contract; adapt unfinished
+- [x] Run `prisma validate` and regenerate the client from the checked-in schema.
+- [x] Inventory every missing Prisma model/field diagnostic by service.
+- [x] Treat the checked-in schema as the persistence contract; adapt unfinished
   services to existing fields unless a field is required by a verified workflow.
 - [ ] Add repository/service tests before each schema-affecting behavior change.
-- [ ] Run `prisma validate`, tests, and compile after each domain.
+- [x] Run `prisma validate`, tests, and compile after each domain.
 
 ### Task 4: Repair route and service type safety by domain
 

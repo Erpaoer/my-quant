@@ -1,4 +1,5 @@
 import { PrismaClient, MarketData, Strategy, Backtest, Trade } from '@prisma/client'
+import { errorMessage } from '../../utils/errors'
 
 const prisma = new PrismaClient()
 
@@ -113,7 +114,7 @@ export class BacktestEngine {
       return result
     } catch (error) {
       if (onLog) {
-        onLog('error', `回测执行失败: ${error.message}`)
+        onLog('error', `回测执行失败: ${errorMessage(error)}`)
       }
       throw error
     }
@@ -250,6 +251,7 @@ export class BacktestEngine {
         strategyId: '', // 将在调用时设置
         userId: '', // 将在调用时设置
         backtestId: '', // 将在调用时设置
+        accountId: null,
         symbol,
         type,
         side: type === 'buy' ? 'long' : 'short',
@@ -261,7 +263,7 @@ export class BacktestEngine {
         slippage: Math.abs(actualPrice - price) * quantity,
         pnl: this.calculateTradePnL(signal, currentPosition),
         profit: this.calculateTradePnL(signal, currentPosition),
-        notes: signal.reason
+        notes: signal.reason ?? null
       }
 
       this.trades.push(trade)
@@ -271,7 +273,7 @@ export class BacktestEngine {
       }
     } catch (error) {
       if (onLog) {
-        onLog('error', `执行交易失败: ${error.message}`)
+        onLog('error', `执行交易失败: ${errorMessage(error)}`)
       }
     }
   }
@@ -368,7 +370,7 @@ export class BacktestEngine {
   }
 
   private calculateDailyReturns(): number[] {
-    const dailyReturns = []
+    const dailyReturns: number[] = []
     for (let i = 1; i < this.equityCurve.length; i++) {
       const dailyReturn = (this.equityCurve[i].value - this.equityCurve[i - 1].value) / this.equityCurve[i - 1].value
       dailyReturns.push(dailyReturn)
