@@ -7,7 +7,8 @@ const prisma = new PrismaClient()
 export interface RiskRule {
   id: string
   name: string
-  type: 'position_size' | 'daily_loss' | 'drawdown' | 'leverage' | 'cooldown' | 'correlation'
+  type: string
+  description?: string | null
   enabled: boolean
   parameters: Record<string, any>
   priority: number
@@ -174,7 +175,7 @@ export class RiskManagementService extends EventEmitter {
       for (const rule of this.rules.values()) {
         const result = await this.evaluateRule(rule, accountId, tradeRequest, accountMetrics)
         
-        if (!result.passed) {
+        if (!result.passed && result.violation) {
           violations.push(result.violation)
           recommendations.push(result.recommendation)
           
@@ -235,7 +236,7 @@ export class RiskManagementService extends EventEmitter {
     }
   }
 
-  private async evaluateRule(rule: RiskRule, accountId: string, tradeRequest: any, metrics: RiskMetrics): Promise<{ passed: boolean; violation: RiskViolation; recommendation: string }> {
+  private async evaluateRule(rule: RiskRule, accountId: string, tradeRequest: any, metrics: RiskMetrics): Promise<{ passed: boolean; violation: RiskViolation | null; recommendation: string }> {
     switch (rule.type) {
       case 'position_size':
         return this.evaluatePositionSizeRule(rule, accountId, tradeRequest, metrics)
@@ -254,7 +255,7 @@ export class RiskManagementService extends EventEmitter {
     }
   }
 
-  private async evaluatePositionSizeRule(rule: RiskRule, accountId: string, tradeRequest: any, metrics: RiskMetrics): Promise<{ passed: boolean; violation: RiskViolation; recommendation: string }> {
+  private async evaluatePositionSizeRule(rule: RiskRule, accountId: string, tradeRequest: any, metrics: RiskMetrics): Promise<{ passed: boolean; violation: RiskViolation | null; recommendation: string }> {
     const tradeValue = parseFloat(tradeRequest.amount) * (parseFloat(tradeRequest.price) || 1)
     const maxPositionSize = rule.parameters.maxPositionSize
     const maxSinglePosition = rule.parameters.maxSinglePosition
@@ -296,7 +297,7 @@ export class RiskManagementService extends EventEmitter {
     return { passed: true, violation: null, recommendation: '' }
   }
 
-  private async evaluateDailyLossRule(rule: RiskRule, accountId: string, tradeRequest: any, metrics: RiskMetrics): Promise<{ passed: boolean; violation: RiskViolation; recommendation: string }> {
+  private async evaluateDailyLossRule(rule: RiskRule, accountId: string, tradeRequest: any, metrics: RiskMetrics): Promise<{ passed: boolean; violation: RiskViolation | null; recommendation: string }> {
     const maxDailyLoss = rule.parameters.maxDailyLoss
     const currentLoss = Math.abs(Math.min(0, metrics.dailyPnL))
 
@@ -320,7 +321,7 @@ export class RiskManagementService extends EventEmitter {
     return { passed: true, violation: null, recommendation: '' }
   }
 
-  private async evaluateDrawdownRule(rule: RiskRule, accountId: string, tradeRequest: any, metrics: RiskMetrics): Promise<{ passed: boolean; violation: RiskViolation; recommendation: string }> {
+  private async evaluateDrawdownRule(rule: RiskRule, accountId: string, tradeRequest: any, metrics: RiskMetrics): Promise<{ passed: boolean; violation: RiskViolation | null; recommendation: string }> {
     const maxDrawdown = rule.parameters.maxDrawdown
     const criticalDrawdown = rule.parameters.criticalDrawdown
 
@@ -361,7 +362,7 @@ export class RiskManagementService extends EventEmitter {
     return { passed: true, violation: null, recommendation: '' }
   }
 
-  private async evaluateLeverageRule(rule: RiskRule, accountId: string, tradeRequest: any, metrics: RiskMetrics): Promise<{ passed: boolean; violation: RiskViolation; recommendation: string }> {
+  private async evaluateLeverageRule(rule: RiskRule, accountId: string, tradeRequest: any, metrics: RiskMetrics): Promise<{ passed: boolean; violation: RiskViolation | null; recommendation: string }> {
     const maxLeverage = rule.parameters.maxLeverage
 
     if (metrics.leverageUsage > maxLeverage) {
@@ -384,7 +385,7 @@ export class RiskManagementService extends EventEmitter {
     return { passed: true, violation: null, recommendation: '' }
   }
 
-  private async evaluateCooldownRule(rule: RiskRule, accountId: string, tradeRequest: any, metrics: RiskMetrics): Promise<{ passed: boolean; violation: RiskViolation; recommendation: string }> {
+  private async evaluateCooldownRule(rule: RiskRule, accountId: string, tradeRequest: any, metrics: RiskMetrics): Promise<{ passed: boolean; violation: RiskViolation | null; recommendation: string }> {
     const cooldownPeriod = rule.parameters.cooldownPeriod
     const now = Date.now()
 
@@ -427,7 +428,7 @@ export class RiskManagementService extends EventEmitter {
     return { passed: true, violation: null, recommendation: '' }
   }
 
-  private async evaluateCorrelationRule(rule: RiskRule, accountId: string, tradeRequest: any, metrics: RiskMetrics): Promise<{ passed: boolean; violation: RiskViolation; recommendation: string }> {
+  private async evaluateCorrelationRule(rule: RiskRule, accountId: string, tradeRequest: any, metrics: RiskMetrics): Promise<{ passed: boolean; violation: RiskViolation | null; recommendation: string }> {
     // 简化的相关性检查
     const maxConcurrentPositions = rule.parameters.maxConcurrentPositions
     
@@ -528,7 +529,7 @@ export class RiskManagementService extends EventEmitter {
     })
 
     return positions.reduce((total, position) => {
-      return total + (parseFloat(position.size) * parseFloat(position.markPrice))
+      return total + (position.size * (position.markPrice ?? position.entryPrice))
     }, 0)
   }
 
@@ -545,8 +546,7 @@ export class RiskManagementService extends EventEmitter {
     })
 
     return trades.reduce((pnl, trade) => {
-      const tradePnl = parseFloat(trade.metadata?.pnl || '0')
-      return pnl + tradePnl
+      return pnl + (trade.pnl ?? 0)
     }, 0)
   }
 
@@ -593,8 +593,7 @@ export class RiskManagementService extends EventEmitter {
     if (trades.length === 0) return 0
 
     const winningTrades = trades.filter(trade => {
-      const pnl = parseFloat(trade.metadata?.pnl || '0')
-      return pnl > 0
+      return (trade.pnl ?? 0) > 0
     })
 
     return winningTrades.length / trades.length
@@ -605,12 +604,12 @@ export class RiskManagementService extends EventEmitter {
     if (trades.length === 0) return 0
 
     const grossProfit = trades.reduce((sum, trade) => {
-      const pnl = parseFloat(trade.metadata?.pnl || '0')
+      const pnl = trade.pnl ?? 0
       return sum + Math.max(0, pnl)
     }, 0)
 
     const grossLoss = trades.reduce((sum, trade) => {
-      const pnl = parseFloat(trade.metadata?.pnl || '0')
+      const pnl = trade.pnl ?? 0
       return sum + Math.abs(Math.min(0, pnl))
     }, 0)
 
@@ -635,7 +634,7 @@ export class RiskManagementService extends EventEmitter {
     }, 0)
   }
 
-  private calculateOverallRiskScore(metrics: RiskMetrics): number {
+  private calculateOverallRiskScore(metrics: Omit<RiskMetrics, 'riskScore'>): number {
     // 综合风险评分算法
     const drawdownScore = metrics.currentDrawdown * 100
     const leverageScore = metrics.leverageUsage > 1 ? (metrics.leverageUsage - 1) * 20 : 0
@@ -675,7 +674,7 @@ export class RiskManagementService extends EventEmitter {
         console.log('Processing violations:', assessment.violations.length);
         
         // 首先验证所有违规的ruleId
-        const validViolations = [];
+        const validViolations: RiskViolation[] = [];
         for (const violation of assessment.violations) {
           console.log('Processing violation:', violation);
           
@@ -712,11 +711,11 @@ export class RiskManagementService extends EventEmitter {
               ruleId: violation.ruleId,
               level: assessment.riskLevel,
               score: assessment.riskLevel === 'low' ? 25 : assessment.riskLevel === 'medium' ? 50 : assessment.riskLevel === 'high' ? 75 : 100,
-              factors: {
+              factors: JSON.parse(JSON.stringify({
                 tradeRequest,
                 assessment,
                 violation
-              },
+              })),
               triggered: !assessment.passed,
               action: violation.recommendation
             }
@@ -733,10 +732,10 @@ export class RiskManagementService extends EventEmitter {
               ruleId: defaultRule.id,
               level: assessment.riskLevel,
               score: assessment.riskLevel === 'low' ? 25 : assessment.riskLevel === 'medium' ? 50 : assessment.riskLevel === 'high' ? 75 : 100,
-              factors: {
+              factors: JSON.parse(JSON.stringify({
                 tradeRequest,
                 assessment
-              },
+              })),
               triggered: false
             }
           });
@@ -751,10 +750,10 @@ export class RiskManagementService extends EventEmitter {
             ruleId: defaultRule.id,
             level: assessment.riskLevel,
             score: assessment.riskLevel === 'low' ? 25 : assessment.riskLevel === 'medium' ? 50 : assessment.riskLevel === 'high' ? 75 : 100,
-            factors: {
+            factors: JSON.parse(JSON.stringify({
               tradeRequest,
               assessment
-            },
+            })),
             triggered: false
           }
         });
@@ -896,17 +895,16 @@ export class RiskManagementService extends EventEmitter {
 
   private async createRiskAlert(accountId: string, type: string, data: any): Promise<void> {
     try {
-      const alert = await prisma.riskAlert.create({
-        data: {
-          accountId,
-          type,
-          severity: this.getAlertSeverity(type, data),
-          message: this.generateAlertMessage(type, data),
-          data,
-          timestamp: new Date(),
-          status: 'active'
-        }
-      })
+      const alert = {
+        id: `${accountId}:${type}:${Date.now()}`,
+        accountId,
+        type,
+        severity: this.getAlertSeverity(type, data),
+        message: this.generateAlertMessage(type, data),
+        data,
+        timestamp: new Date(),
+        status: 'active'
+      }
 
       // 添加到内存缓存
       const alerts = this.riskAlerts.get(accountId) || []
@@ -1003,7 +1001,7 @@ export class RiskManagementService extends EventEmitter {
       warnings.push(...balanceValidation.warnings)
 
       // 市场数据验证
-      const marketValidation = await this.validateMarketData(orderData)
+      const marketValidation = await this.validateMarketData(account, orderData)
       if (!marketValidation.valid) {
         errors.push(...marketValidation.errors)
       }
@@ -1029,7 +1027,7 @@ export class RiskManagementService extends EventEmitter {
       warnings.push(...typeValidation.warnings)
 
       // 流动性验证
-      const liquidityValidation = await this.validateLiquidity(orderData)
+      const liquidityValidation = await this.validateLiquidity(account, orderData)
       if (!liquidityValidation.valid) {
         errors.push(...liquidityValidation.errors)
       }
@@ -1185,7 +1183,7 @@ export class RiskManagementService extends EventEmitter {
         
         if (usdtBalance) {
           console.log('   - USDT balance details:', JSON.stringify(usdtBalance, null, 2));
-          availableUSDT = parseFloat(usdtBalance.free);
+          availableUSDT = Number(usdtBalance.free);
           realTimeBalance = availableUSDT;
           console.log('✅ FOUND USDT BALANCE:', availableUSDT);
         } else {
@@ -1196,7 +1194,7 @@ export class RiskManagementService extends EventEmitter {
           
           if (balances.length > 0) {
             const firstBalance = balances[0];
-            realTimeBalance = parseFloat(firstBalance.free) || 0;
+            realTimeBalance = Number(firstBalance.free) || 0;
             availableUSDT = realTimeBalance;
             console.log('🔄 USING FIRST AVAILABLE BALANCE:', availableUSDT, 'from asset:', firstBalance.asset);
           }
@@ -1270,7 +1268,7 @@ export class RiskManagementService extends EventEmitter {
     return { valid: errors.length === 0, errors, warnings }
   }
 
-  private async validateMarketData(orderData: any): Promise<{
+  private async validateMarketData(account: { exchange: string }, orderData: any): Promise<{
     valid: boolean
     errors: string[]
     warnings: string[]
@@ -1280,7 +1278,7 @@ export class RiskManagementService extends EventEmitter {
 
     try {
       // 获取当前市场价格
-      const marketData = await exchangeService.getTicker(account.accountId, orderData.symbol)
+      const marketData = await exchangeService.getTicker(account.exchange, orderData.symbol)
       
       if (!marketData) {
         errors.push('无法获取市场数据')
@@ -1304,13 +1302,8 @@ export class RiskManagementService extends EventEmitter {
       }
 
       // 市场流动性检查
-      if (marketData.volume24h < 10000) {
+      if (marketData.volume < 10000) {
         warnings.push('交易对流动性较低')
-      }
-
-      // 价格波动性检查
-      if (marketData.change24h && Math.abs(marketData.change24h) > 20) {
-        warnings.push('市场价格波动较大，请谨慎交易')
       }
 
     } catch (error) {
@@ -1338,7 +1331,7 @@ export class RiskManagementService extends EventEmitter {
 
       case 'limit':
         // 限价单验证
-        const marketData = await exchangeService.getTicker(account.accountId, orderData.symbol)
+        const marketData = await exchangeService.getTicker(account.exchange, orderData.symbol)
         if (marketData && orderData.price) {
           const price = parseFloat(orderData.price)
           const currentPrice = marketData.last
@@ -1386,7 +1379,7 @@ export class RiskManagementService extends EventEmitter {
     return { valid: errors.length === 0, errors, warnings }
   }
 
-  private async validateLiquidity(orderData: any): Promise<{
+  private async validateLiquidity(account: { exchange: string }, orderData: any): Promise<{
     valid: boolean
     errors: string[]
     warnings: string[]
@@ -1398,7 +1391,7 @@ export class RiskManagementService extends EventEmitter {
       const orderValue = parseFloat(orderData.amount) * (parseFloat(orderData.price) || 0)
       
       // 获取市场深度数据
-      const orderBook = await exchangeService.getOrderBook(orderData.symbol)
+      const orderBook = await exchangeService.getOrderBook(account.exchange, orderData.symbol)
       
       if (orderBook) {
         const marketDepth = this.calculateMarketDepth(orderBook)
@@ -1507,18 +1500,14 @@ export class RiskManagementService extends EventEmitter {
 
   async getRiskReport(accountId: string, period: 'day' | 'week' | 'month' = 'week'): Promise<any> {
     const startDate = this.getPeriodStartDate(period)
+    const alerts = (this.riskAlerts.get(accountId) || [])
+      .filter(alert => new Date(alert.timestamp) >= startDate)
     
-    const [assessments, alerts, trades] = await Promise.all([
+    const [assessments, trades] = await Promise.all([
       prisma.riskAssessment.findMany({
         where: {
           accountId,
-          timestamp: { gte: startDate }
-        }
-      }),
-      prisma.riskAlert.findMany({
-        where: {
-          accountId,
-          timestamp: { gte: startDate }
+          createdAt: { gte: startDate }
         }
       }),
       prisma.trade.findMany({
@@ -1533,7 +1522,7 @@ export class RiskManagementService extends EventEmitter {
       period,
       startDate,
       totalAssessments: assessments.length,
-      failedAssessments: assessments.filter(a => !a.passed).length,
+      failedAssessments: assessments.filter(a => a.triggered).length,
       totalAlerts: alerts.length,
       criticalAlerts: alerts.filter(a => a.severity === 'critical').length,
       totalTrades: trades.length,

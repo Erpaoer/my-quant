@@ -437,12 +437,6 @@ export class TradingWebSocketHandler {
       }
 
       // 检查订单大小限制
-      if (orderData.amount && account.maxOrderSize) {
-        if (parseFloat(orderData.amount) > account.maxOrderSize) {
-          return { passed: false, reason: 'Order size exceeds maximum allowed' };
-        }
-      }
-
       // 检查日交易限制
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -450,13 +444,9 @@ export class TradingWebSocketHandler {
       const todayTrades = await prisma.trade.count({
         where: {
           accountId,
-          createdAt: { gte: today }
+          timestamp: { gte: today }
         }
       });
-
-      if (account.dailyTradeLimit && todayTrades >= account.dailyTradeLimit) {
-        return { passed: false, reason: 'Daily trade limit exceeded' };
-      }
 
       return { passed: true };
     } catch (error) {
@@ -470,21 +460,21 @@ export class TradingWebSocketHandler {
       await prisma.order.create({
         data: {
           accountId,
-          exchangeOrderId: order.id,
+          exchangeId: order.exchangeId ?? order.id,
           symbol: order.symbol,
           type: order.type,
           side: order.side,
-          amount: order.amount.toString(),
-          price: order.price?.toString(),
+          quantity: Number(order.amount),
+          price: order.price,
           status: order.status,
-          filled: order.filled?.toString() || '0',
-          remaining: order.remaining?.toString() || order.amount.toString(),
-          average: order.average?.toString(),
-          cost: order.cost?.toString(),
-          fee: order.fee?.toString(),
+          filledQuantity: Number(order.filled ?? 0),
+          averagePrice: order.average,
+          commission: order.fee,
           feeCurrency: order.feeCurrency,
           clientOrderId: order.clientOrderId,
-          exchangeId: order.exchangeId,
+          createTime: new Date(order.createTime ?? Date.now()),
+          updateTime: order.updateTime ? new Date(order.updateTime) : undefined,
+          executedTime: order.executedTime ? new Date(order.executedTime) : undefined,
           metadata: order.metadata
         }
       });
@@ -499,7 +489,7 @@ export class TradingWebSocketHandler {
         where: {
           accountId,
           OR: [
-            { exchangeOrderId: orderId },
+            { exchangeId: orderId },
             { id: orderId }
           ]
         },

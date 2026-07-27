@@ -40,17 +40,17 @@ data routes (19), and real-time trading (15). Backend tests currently pass 20/20
 ### Task 4: Repair route and service type safety by domain
 
 - [x] Backtest controllers and routes: return paths, error narrowing, typed arrays.
-- [ ] Data routes and manager: request query narrowing, awaited promises, typed
+- [x] Data routes and manager: request query narrowing, awaited promises, typed
   indicator and market-data arrays.
-- [ ] Trading routes, logs, and sockets: nullable account identifiers, order model
+- [x] Trading routes, logs, and sockets: nullable account identifiers, order model
   fields, response payload narrowing.
-- [ ] Risk management: rule discriminants, nullable violations, JSON serialization,
+- [x] Risk management: rule discriminants, nullable violations, JSON serialization,
   and missing-variable defects.
 - [ ] Keep each domain in a separate commit with focused tests.
 
 ### Task 5: Establish the production compile gate
 
-- [ ] Make `npm run build` exit 0 without reducing compiler strictness.
+- [x] Make `npm run build` exit 0 without reducing compiler strictness.
 - [ ] Run backend and frontend unit suites, frontend production build, and browser
   navigation E2E.
 - [ ] Re-run live read-only Tushare connection/sample/history checks.

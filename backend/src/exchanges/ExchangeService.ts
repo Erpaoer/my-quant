@@ -16,7 +16,8 @@ import {
   ConnectionStatus,
   SyncResult,
   ExchangeEvent,
-  ExchangeEventType
+  ExchangeEventType,
+  SubscriptionOptions
 } from './types';
 
 export class ExchangeService {
@@ -221,6 +222,15 @@ export class ExchangeService {
   async getOHLCV(exchangeId: string, symbol: string, timeframe?: string, limit?: number): Promise<Candle[]> {
     const exchange = this.getExchange(exchangeId);
     return await exchange.getOHLCV(symbol, timeframe, limit);
+  }
+
+  async subscribeMarketData(
+    exchangeId: string,
+    symbols: string[],
+    options?: SubscriptionOptions
+  ): Promise<void> {
+    const exchange = this.getExchange(exchangeId);
+    await exchange.subscribeMarketData(symbols, options);
   }
 
   // 批量操作
