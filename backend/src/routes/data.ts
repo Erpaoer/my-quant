@@ -11,8 +11,10 @@ import {
   initDataManager, 
   getDataManager, 
   YahooFinanceAdapter,
+  TushareAdapter,
   DataSourceConfig 
 } from '../services/data';
+import config from '../config';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -35,6 +37,10 @@ async function ensureDataManagerInitialized() {
     
     const yahooAdapter = new YahooFinanceAdapter(yahooConfig);
     manager.registerAdapter(yahooAdapter);
+
+    if (config.TUSHARE_TOKEN) {
+      manager.registerAdapter(new TushareAdapter(config.TUSHARE_TOKEN));
+    }
     
     await manager.initialize();
     dataManagerInitialized = true;

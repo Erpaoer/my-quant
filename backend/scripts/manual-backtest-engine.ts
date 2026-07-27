@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client'
-import BacktestEngine from '../services/backtest/BacktestEngine'
+import BacktestEngine from '../src/services/backtest/BacktestEngine'
 import { Strategy } from '@prisma/client'
 
 const prisma = new PrismaClient()

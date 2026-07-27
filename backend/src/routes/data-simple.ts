@@ -1,8 +1,39 @@
-import { Router } from 'express';
+import { Router, type Response } from 'express';
 import { body, validationResult } from 'express-validator';
 import axios from 'axios';
+import config from '../config';
+import { TushareAdapter } from '../services/data/adapters/TushareAdapter';
 
 const router = Router();
+
+function upstreamStatus(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const response = (error as { response?: { status?: unknown } }).response;
+  return typeof response?.status === 'number' ? response.status : undefined;
+}
+
+function sendYahooFailure(
+  res: Response,
+  error: unknown,
+  operation: 'connection' | 'sample' | 'api'
+) {
+  const status = upstreamStatus(error);
+  const isBlocked = status === 403;
+  const messages = {
+    connection: 'Failed to connect to Yahoo Finance',
+    sample: 'Failed to retrieve Yahoo Finance sample data',
+    api: 'Yahoo Finance API test failed'
+  };
+
+  return res.status(isBlocked ? 503 : 502).json({
+    success: false,
+    message: isBlocked
+      ? 'Yahoo Finance is unavailable from the current network'
+      : messages[operation],
+    error: error instanceof Error ? error.message : 'Unknown upstream error',
+    ...(status ? { upstreamStatus: status } : {})
+  });
+}
 
 // Test data source connection
 router.post('/test-connection', async (req, res) => {
@@ -12,7 +43,6 @@ router.post('/test-connection', async (req, res) => {
     console.log('=== 数据源连接测试 ===');
     console.log('📥 请求报文:');
     console.log(`  URL: POST /data-test/test-connection`);
-    console.log(`  Headers:`, JSON.stringify(req.headers, null, 2));
     console.log(`  Body:`, JSON.stringify(req.body, null, 2));
     console.log(`  测试数据源: ${source} (${type})`);
     
@@ -63,6 +93,21 @@ router.post('/test-connection', async (req, res) => {
         console.log(`  Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
         throw new Error(`Binance API connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
+    } else if (source.toLowerCase() === 'tushare') {
+      const adapter = new TushareAdapter(config.TUSHARE_TOKEN);
+      await adapter.connect();
+      const latency = Date.now() - startTime;
+      res.json({
+        success: true,
+        message: 'Tushare Pro connection successful',
+        data: {
+          source: 'tushare',
+          type: 'REST API',
+          connected: true,
+          latency,
+          timestamp: new Date().toISOString()
+        }
+      });
     } else if (source.toLowerCase() === 'yahoo') {
       // Test Yahoo Finance connection (using a public endpoint)
       try {
@@ -111,7 +156,7 @@ router.post('/test-connection', async (req, res) => {
       } catch (error) {
         console.log('❌ Yahoo Finance API错误:');
         console.log(`  Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        throw new Error(`Yahoo Finance connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        return sendYahooFailure(res, error, 'connection');
       }
     } else {
       // For other sources, simulate connection test
@@ -177,7 +222,6 @@ router.post('/sample', async (req, res) => {
     console.log('=== 获取数据样例 ===');
     console.log('📥 请求报文:');
     console.log(`  URL: POST /data-test/sample`);
-    console.log(`  Headers:`, JSON.stringify(req.headers, null, 2));
     console.log(`  Body:`, JSON.stringify(req.body, null, 2));
     console.log(`  数据源: ${source}, 交易对: ${symbol}, 限制: ${limit}`);
     
@@ -255,6 +299,21 @@ router.post('/sample', async (req, res) => {
         
         res.json(fallbackResponse);
       }
+    } else if (source.toLowerCase() === 'tushare') {
+      const adapter = new TushareAdapter(config.TUSHARE_TOKEN);
+      const endTime = new Date();
+      const startTime = new Date(endTime.getTime() - 45 * 24 * 60 * 60 * 1000);
+      const sampleData = await adapter.fetchHistoricalData({
+        symbol: symbol || '000001.SZ',
+        startTime,
+        endTime,
+        interval: '1d'
+      });
+      res.json({
+        success: true,
+        message: 'Real Tushare Pro daily data retrieved successfully',
+        data: sampleData.slice(-Math.max(1, Math.min(Number(limit) || 5, 20)))
+      });
     } else if (source.toLowerCase() === 'yahoo') {
       try {
         console.log('🌐 外部API请求 (Yahoo Finance):');
@@ -321,22 +380,9 @@ router.post('/sample', async (req, res) => {
           throw new Error('Invalid Yahoo Finance data format');
         }
       } catch (error) {
-        console.log('❌ Yahoo Finance API错误，使用fallback数据:');
+        console.log('❌ Yahoo Finance API错误:');
         console.log(`  Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        
-        const sampleData = generateYahooSampleData(symbol, limit);
-        const fallbackResponse = {
-          success: true,
-          message: 'Sample data retrieved successfully (fallback)',
-          data: sampleData
-        };
-        
-        console.log('📤 返回客户端报文 (fallback):');
-        console.log(`  Status: 200 OK`);
-        console.log(`  数据记录数: ${sampleData.length}`);
-        console.log('=== 数据样例获取完成 ===\n');
-        
-        res.json(fallbackResponse);
+        return sendYahooFailure(res, error, 'sample');
       }
     } else {
       // For other sources, use generated data
@@ -399,7 +445,6 @@ router.post('/test-api', async (req, res) => {
     console.log('=== API功能测试 ===');
     console.log('📥 请求报文:');
     console.log(`  URL: POST /data-test/test-api`);
-    console.log(`  Headers:`, JSON.stringify(req.headers, null, 2));
     console.log(`  Body:`, JSON.stringify(req.body, null, 2));
     console.log(`  数据源: ${source}, API类型: ${apiType}, 交易对: ${symbol}, 时间间隔: ${interval}`);
     
@@ -700,37 +745,34 @@ router.post('/test-api', async (req, res) => {
           throw new Error('Invalid Yahoo Finance data format');
         }
       } catch (error) {
-        console.log('❌ Yahoo Finance API错误，使用fallback数据:');
+        console.log('❌ Yahoo Finance API错误:');
         console.log(`  Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        
-        let fallbackData;
-        switch (apiType) {
-          case 'market':
-            fallbackData = generateMarketDataSample(symbol);
-            break;
-          case 'historical':
-            fallbackData = generateHistoricalDataSample(symbol, interval);
-            break;
-          case 'realtime':
-            fallbackData = generateRealtimeDataSample(symbol);
-            break;
-          default:
-            fallbackData = generateGenericSampleData(symbol, 1);
-        }
-        
-        const fallbackResponse = {
-          success: true,
-          message: 'API test successful (fallback)',
-          data: fallbackData
-        };
-        
-        console.log('📤 返回客户端报文 (fallback):');
-        console.log(`  Status: 200 OK`);
-        console.log(`  Data:`, JSON.stringify(fallbackData, null, 2));
-        console.log('=== API测试完成 ===\n');
-        
-        res.json(fallbackResponse);
+        return sendYahooFailure(res, error, 'api');
       }
+    } else if (source.toLowerCase() === 'tushare') {
+      if (apiType !== 'historical' || interval !== '1d') {
+        return res.status(400).json({
+          success: false,
+          message: 'Tushare Pro supports historical daily data only'
+        });
+      }
+
+      const adapter = new TushareAdapter(config.TUSHARE_TOKEN);
+      const endTime = new Date();
+      const startTime = new Date(endTime);
+      startTime.setUTCDate(startTime.getUTCDate() - 30);
+      const data = await adapter.fetchHistoricalData({
+        symbol: symbol || '000001.SZ',
+        interval: '1d',
+        startTime,
+        endTime
+      });
+
+      return res.json({
+        success: true,
+        message: 'Real Tushare Pro daily data retrieved successfully',
+        data
+      });
     } else {
       // For other sources, use generated data
       console.log('🎲 生成模拟API数据:');

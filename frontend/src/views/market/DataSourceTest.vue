@@ -56,13 +56,17 @@
                   <el-option label="OKX" value="okx" />
                   <el-option label="Huobi" value="huobi" />
                   <el-option label="Yahoo Finance" value="yahoo" />
+                  <el-option label="Tushare Pro（日线）" value="tushare" />
                 </el-select>
               </el-form-item>
               <el-form-item label="API类型">
                 <el-select v-model="apiTestForm.apiType">
-                  <el-option label="市场数据" value="market" />
-                  <el-option label="历史数据" value="historical" />
-                  <el-option label="实时数据" value="realtime" />
+                  <el-option
+                    v-for="option in apiTypeOptions"
+                    :key="option.value"
+                    :label="option.label"
+                    :value="option.value"
+                  />
                 </el-select>
               </el-form-item>
               <el-form-item label="交易对">
@@ -199,9 +203,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { computed, ref, reactive, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Connection, ConnectionFailed } from '@element-plus/icons-vue'
+import {
+  apiTypesForSource,
+  createDefaultApiTestForm,
+  createDefaultDataSources,
+  defaultSymbolFor,
+  normalizeSourceId,
+  startupSourceIds
+} from './dataSourceConfig'
 
 const activeTab = ref('api')
 const wsConnected = ref(false)
@@ -209,44 +221,22 @@ const wsMessages = ref([])
 const selectedSample = ref('market')
 
 // 数据源状态
-const dataSources = ref([
-  {
-    name: 'Binance',
-    type: 'REST API',
-    connected: false,
-    latency: 0,
-    errorCount: 0
-  },
-  {
-    name: 'OKX',
-    type: 'REST API',
-    connected: false,
-    latency: 0,
-    errorCount: 0
-  },
-  {
-    name: 'Yahoo Finance',
-    type: 'REST API',
-    connected: true,
-    latency: 150,
-    errorCount: 0
-  },
-  {
-    name: 'Binance WebSocket',
-    type: 'WebSocket',
-    connected: false,
-    latency: 0,
-    errorCount: 0
-  }
-])
+const dataSources = ref(createDefaultDataSources())
 
 // API测试表单
-const apiTestForm = reactive({
-  source: 'yahoo',
-  apiType: 'market',
-  symbol: 'BTCUSDT',
-  interval: '1h'
-})
+const apiTestForm = reactive(createDefaultApiTestForm())
+const apiTypeOptions = computed(() => apiTypesForSource(apiTestForm.source))
+
+watch(
+  () => apiTestForm.source,
+  (sourceId) => {
+    if (sourceId === 'tushare') {
+      apiTestForm.apiType = 'historical'
+      apiTestForm.symbol = defaultSymbolFor(sourceId)
+      apiTestForm.interval = '1d'
+    }
+  }
+)
 
 // WebSocket测试表单
 const wsTestForm = reactive({
@@ -274,29 +264,31 @@ const sampleData = ref('')
 const testConnection = async (source: any) => {
   try {
     const startTime = Date.now()
+    const sourceId = normalizeSourceId(source)
     
     // 模拟API调用
-    const response = await fetch(`${import.meta.env.VITE_API_URL}/data-test/test-connection`, {
+    const response = await fetch(`${import.meta.env.VITE_API_URL || '/api'}/data-test/test-connection`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${localStorage.getItem('token')}`
       },
       body: JSON.stringify({
-        source: source.name.toLowerCase(),
+        source: sourceId,
         type: source.type
       })
     })
     
     const latency = Date.now() - startTime
     
-    if (response.ok) {
+    const data = await response.json()
+    if (response.ok && data.success) {
       source.connected = true
       source.latency = latency
       source.errorCount = 0
       ElMessage.success(`${source.name} 连接测试成功，延迟: ${latency}ms`)
     } else {
-      throw new Error(`HTTP ${response.status}`)
+      throw new Error(data.error || data.message || `HTTP ${response.status}`)
     }
   } catch (error) {
     source.connected = false
@@ -309,22 +301,26 @@ const testConnection = async (source: any) => {
 const fetchSampleData = async (source: any) => {
   try {
     const startTime = Date.now()
+    const sourceId = normalizeSourceId(source)
     
-    const response = await fetch(`${import.meta.env.VITE_API_URL}/data-test/sample`, {
+    const response = await fetch(`${import.meta.env.VITE_API_URL || '/api'}/data-test/sample`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${localStorage.getItem('token')}`
       },
       body: JSON.stringify({
-        source: source.name.toLowerCase(),
-        symbol: 'BTCUSDT',
+        source: sourceId,
+        symbol: defaultSymbolFor(sourceId),
         limit: 5
       })
     })
     
     const duration = Date.now() - startTime
     const data = await response.json()
+    if (!data.success) {
+      throw new Error(data.error || data.message || 'Failed to retrieve sample data')
+    }
     
     if (data.success) {
       testResult.show = true
@@ -438,10 +434,7 @@ const stopWebSocketTest = () => {
 
 // 重置表单
 const resetApiForm = () => {
-  apiTestForm.source = 'yahoo'
-  apiTestForm.apiType = 'market'
-  apiTestForm.symbol = 'BTCUSDT'
-  apiTestForm.interval = '1h'
+  Object.assign(apiTestForm, createDefaultApiTestForm())
 }
 
 // 加载样例数据
@@ -544,10 +537,14 @@ const formatTime = (date: Date) => {
 // 生命周期
 onMounted(() => {
   loadSample()
-  // 初始化数据源状态
-  setTimeout(() => {
-    testConnection(dataSources.value[2]) // Yahoo Finance
-  }, 1000)
+  for (const sourceId of startupSourceIds) {
+    const source = dataSources.value.find(
+      (candidate) => normalizeSourceId(candidate) === sourceId
+    )
+    if (source) {
+      void testConnection(source)
+    }
+  }
 })
 
 onUnmounted(() => {

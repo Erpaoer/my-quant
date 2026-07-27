@@ -268,11 +268,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import SidebarNav from './SidebarNav.vue'
 import TabSystem from './TabSystem.vue'
+import { createStaticTab, staticTabIds } from './tabRegistry'
+import { loadTabState, saveTabState } from './tabPersistence'
 import {
   FullScreen,
   Bell,
@@ -335,6 +337,7 @@ const showRightPanel = ref(false)
 // 页签管理
 const tabSystemRef = ref()
 const tabs = ref<Tab[]>([])
+const persistenceReady = ref(false)
 
 // 系统状态
 const systemStatus = ref('success')
@@ -468,6 +471,21 @@ const connectionIcon = computed(() => {
 
 // 方法
 const handleNavClick = (item: string) => {
+  const staticTab = createStaticTab(item)
+  if (!staticTab) {
+    ElMessage.error(`未知模块: ${item}`)
+    return
+  }
+
+  const current = tabs.value.find(tab => tab.id === item)
+  if (current) {
+    activeTab.value = item
+    return
+  }
+
+  tabSystemRef.value?.addTab(staticTab)
+  return
+
   // 如果点击已存在的标签，切换到该标签
   const existingTab = tabs.value.find(tab => tab.id === item)
   if (existingTab) {
@@ -581,6 +599,7 @@ const handleNavClick = (item: string) => {
 
 const handleTabChange = (tab: Tab) => {
   activeTab.value = tab.id
+  if (staticTabIds.has(tab.id)) activeNav.value = tab.id
 }
 
 const handleTabClose = (tabId: string) => {
@@ -588,8 +607,23 @@ const handleTabClose = (tabId: string) => {
 }
 
 const handleTabsUpdate = (updatedTabs: Tab[]) => {
-  tabs.value = updatedTabs
+  tabs.value = [...updatedTabs]
 }
+
+watch(
+  [tabs, activeTab],
+  () => {
+    if (!persistenceReady.value) return
+    const openTabIds = tabs.value
+      .map(tab => tab.id)
+      .filter(id => staticTabIds.has(id))
+    saveTabState(localStorage, {
+      openTabIds: openTabIds.length ? openTabIds : ['dashboard'],
+      activeTabId: staticTabIds.has(activeTab.value) ? activeTab.value : 'dashboard'
+    })
+  },
+  { deep: true }
+)
 
 // 处理策略查看
 const handleViewStrategy = (strategy: any) => {
@@ -736,7 +770,13 @@ const handleKeyDown = (event: KeyboardEvent) => {
 // 生命周期
 onMounted(() => {
   // 初始化默认页签
-  handleNavClick('dashboard')
+  const restored = loadTabState(localStorage, staticTabIds)
+  tabs.value = restored.openTabIds
+    .map(id => createStaticTab(id))
+    .filter((tab): tab is Tab => tab !== null)
+  activeTab.value = restored.activeTabId
+  activeNav.value = restored.activeTabId
+  persistenceReady.value = true
   
   // 启动定时器
   const timer = setInterval(updateMarketTime, 1000)

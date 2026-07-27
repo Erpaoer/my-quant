@@ -184,6 +184,10 @@
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from "vue";
 import * as echarts from "echarts";
 import {
+  formatAxisValue,
+  generateCandlestickData,
+} from "./tradingChartData";
+import {
   Loading,
   FullScreen,
   Aim,
@@ -279,35 +283,6 @@ const visibleIndicators = computed(() => {
   return displayedIndicators.value.filter((indicator) => indicator.visible);
 });
 
-// 模拟数据生成
-const generateMockData = (count: number = 100) => {
-  const data = [];
-  let basePrice = 45000;
-  const now = Date.now();
-
-  for (let i = count - 1; i >= 0; i--) {
-    const time = now - i * 60000; // 1分钟间隔
-    const volatility = 0.002; // 0.2% 波动率
-    const change = (Math.random() - 0.5) * volatility * basePrice;
-
-    basePrice += change;
-    const high = basePrice + Math.random() * 50;
-    const low = basePrice - Math.random() * 50;
-    const open = basePrice + (Math.random() - 0.5) * 20;
-    const close = basePrice;
-
-    data.push([
-      time,
-      open.toFixed(2),
-      high.toFixed(2),
-      low.toFixed(2),
-      close.toFixed(2),
-    ]);
-  }
-
-  return data;
-};
-
 // 初始化图表
 const initChart = async () => {
   await nextTick();
@@ -362,7 +337,7 @@ const initChart = async () => {
         color: "rgba(255, 255, 255, 0.8)",
         fontSize: 11,
         fontFamily: "monospace",
-        formatter: (value: number) => value.toFixed(2),
+        formatter: formatAxisValue,
       },
       splitLine: {
         lineStyle: {
@@ -381,7 +356,7 @@ const initChart = async () => {
       {
         name: "K线",
         type: "candlestick",
-        data: generateMockData(),
+        data: generateCandlestickData(),
         itemStyle: {
           color: "#00d4aa",
           color0: "#ff4757",
@@ -520,7 +495,7 @@ const initChart = async () => {
 const updateChart = () => {
   if (!chartInstance) return;
 
-  const newData = generateMockData(50);
+  const newData = generateCandlestickData(50);
   const option = {
     series: [
       {
@@ -654,7 +629,7 @@ const updateChartWithIndicators = () => {
   series.push({
     name: "K线",
     type: "candlestick",
-    data: generateMockData(),
+    data: generateCandlestickData(),
     itemStyle: {
       color: "#00d4aa",
       color0: "#ff4757",

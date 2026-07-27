@@ -50,11 +50,19 @@ interface YahooFinanceResponse {
   };
 }
 
+interface YahooHttpClient {
+  get<T = unknown>(
+    url: string,
+    config?: Record<string, unknown>
+  ): Promise<{ data: T }>;
+}
+
 export class YahooFinanceAdapter extends BaseDataSourceAdapter {
   private baseUrl: string = 'https://query1.finance.yahoo.com';
   private realTimeUrl: string = 'https://query2.finance.yahoo.com';
+  private client: YahooHttpClient;
 
-  constructor(config: DataSourceConfig) {
+  constructor(config: DataSourceConfig, client: YahooHttpClient = axios) {
     const defaultBaseUrl = 'https://query1.finance.yahoo.com';
     const finalConfig = {
       ...config,
@@ -63,24 +71,30 @@ export class YahooFinanceAdapter extends BaseDataSourceAdapter {
       timeout: config.timeout || 10000
     };
     super(finalConfig);
+    this.client = client;
   }
 
   public async connect(): Promise<boolean> {
     try {
-      // Test connection with a simple request
-      await this.fetchHistoricalData({
-        symbol: 'AAPL',
-        startTime: new Date(Date.now() - 24 * 60 * 60 * 1000),
-        endTime: new Date(),
-        interval: '1d'
-      });
+      const response = await this.timeoutPromise(
+        this.client.get<YahooFinanceResponse>(
+          `${this.baseUrl}/v8/finance/chart/AAPL?interval=1d&range=1d`
+        ),
+        this.config.timeout
+      );
+      if (!response.data.chart?.result?.length) {
+        throw new Error('Invalid Yahoo Finance health response');
+      }
 
       this.connected = true;
       this.connectionTime = new Date();
+      this.lastError = null;
       this.emit('connected');
       return true;
     } catch (error) {
-      this.handleError(error);
+      this.handleError(
+        error instanceof Error ? error : new Error(String(error))
+      );
       return false;
     }
   }
@@ -105,7 +119,7 @@ export class YahooFinanceAdapter extends BaseDataSourceAdapter {
 
       const url = this.buildHistoricalDataUrl(request);
       const response = await this.timeoutPromise(
-        axios.get<YahooFinanceResponse>(url),
+        this.client.get<YahooFinanceResponse>(url),
         this.config.timeout
       );
 
@@ -242,7 +256,7 @@ export class YahooFinanceAdapter extends BaseDataSourceAdapter {
     try {
       const url = `${this.realTimeUrl}/v6/finance/quote?symbols=${symbol}`;
       const response = await this.timeoutPromise(
-        axios.get(url),
+        this.client.get<any>(url),
         this.config.timeout
       );
 

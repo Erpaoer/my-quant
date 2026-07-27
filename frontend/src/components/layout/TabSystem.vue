@@ -42,8 +42,17 @@
     </div>
 
     <div class="tab-content">
+      <div v-if="componentError" class="component-error">
+        <el-alert
+          title="模块加载失败"
+          :description="componentError"
+          type="error"
+          :closable="false"
+          show-icon
+        />
+      </div>
       <div
-        v-for="tab in computedTabs"
+        v-for="tab in renderedTabs"
         :key="tab.id"
         class="tab-pane"
         :class="{ active: activeTabId === tab.id }"
@@ -76,9 +85,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, markRaw, defineAsyncComponent, getCurrentInstance } from 'vue'
+import { ref, computed, watch, defineAsyncComponent, getCurrentInstance, onErrorCaptured } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Close, MoreFilled, Loading } from '@element-plus/icons-vue'
+import {
+  createComponentResolver,
+  resolveTabSelection,
+  selectRenderedTabs
+} from './tabRendering'
 
 // 组件映射
 const componentMap = {
@@ -154,14 +168,13 @@ console.log('🔥 TabSystem attrs:', getContext()?.attrs || {})
 
 const emit = defineEmits<Emits>()
 
-const internalTabs = ref<Tab[]>([...props.tabs])
 const activeTabId = ref(props.modelValue || props.tabs[0]?.id || '')
+const componentError = ref<string | null>(null)
 
 // 计算属性
 const computedTabs = computed({
-  get: () => internalTabs.value,
+  get: () => props.tabs,
   set: (value) => {
-    internalTabs.value = value
     emit('tabs-update', value)
   }
 })
@@ -170,11 +183,11 @@ const activeTab = computed(() => {
   return computedTabs.value.find(tab => tab.id === activeTabId.value)
 })
 
-// 监听props变化
-watch(() => props.tabs, (newTabs) => {
-  internalTabs.value = [...newTabs]
-}, { deep: true })
+const renderedTabs = computed(() => {
+  return selectRenderedTabs(computedTabs.value, activeTabId.value)
+})
 
+// 监听props变化
 watch(() => props.modelValue, (newValue) => {
   if (newValue && newValue !== activeTabId.value) {
     activeTabId.value = newValue
@@ -182,7 +195,8 @@ watch(() => props.modelValue, (newValue) => {
 })
 
 // 方法
-const selectTab = (tabId: string) => {
+const selectTab = (tabId: string, pendingTab?: Tab) => {
+  componentError.value = null
   console.log('🔥 TabSystem selectTab called with:', tabId)
   console.log('🔥 Current activeTabId before:', activeTabId.value)
   
@@ -191,7 +205,7 @@ const selectTab = (tabId: string) => {
   
   emit('update:modelValue', tabId)
   
-  const tab = computedTabs.value.find(t => t.id === tabId)
+  const tab = resolveTabSelection(computedTabs.value, tabId, pendingTab)
   if (tab) {
     console.log('🔥 Found tab, emitting tab-change:', tab)
     emit('tab-change', tab)
@@ -306,13 +320,18 @@ const addTab = (tab: Tab) => {
   }
   
   console.log('🔥 Adding new tab to tabs array')
-  computedTabs.value.push(tab)
+  computedTabs.value = [...computedTabs.value, tab]
   console.log('🔥 Tabs after add:', computedTabs.value)
   
   console.log('🔥 Selecting new tab:', tab.id)
-  selectTab(tab.id)
+  selectTab(tab.id, tab)
   return tab
 }
+
+onErrorCaptured((error) => {
+  componentError.value = error instanceof Error ? error.message : String(error)
+  return false
+})
 
 // 更新标签页的方法
 const updateTab = (tabId: string, updates: Partial<Tab>) => {
@@ -327,17 +346,8 @@ const hasTab = (tabId: string) => {
   return computedTabs.value.some(t => t.id === tabId)
 }
 
-// 解析组件
-const getComponent = (component: any) => {
-  if (typeof component === 'string') {
-    return componentMap[component] || component
-  }
-  // 如果是函数（动态导入），需要用 defineAsyncComponent 包装
-  if (typeof component === 'function') {
-    return defineAsyncComponent(component)
-  }
-  return component
-}
+// 解析组件并缓存动态导入包装器，避免普通重渲染导致页面重新挂载
+const getComponent = createComponentResolver(componentMap)
 
 // 事件处理函数
 const handleViewStrategy = (strategy) => {
@@ -582,6 +592,12 @@ defineExpose({
   flex: 1;
   overflow: hidden;
   position: relative;
+}
+
+.component-error {
+  position: absolute;
+  inset: 16px;
+  z-index: 2;
 }
 
 .tab-pane {

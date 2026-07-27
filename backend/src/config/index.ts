@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import { parsePositiveIntegerEnv } from './env';
 
 dotenv.config();
 
@@ -22,8 +23,14 @@ export const config = {
   TUSHARE_TOKEN: process.env.TUSHARE_TOKEN || '',
   
   // Rate Limiting
-  RATE_LIMIT_WINDOW_MS: process.env.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000, // 15 minutes
-  RATE_LIMIT_MAX_REQUESTS: process.env.RATE_LIMIT_MAX_REQUESTS || 100,
+  RATE_LIMIT_WINDOW_MS: parsePositiveIntegerEnv(
+    process.env.RATE_LIMIT_WINDOW_MS,
+    15 * 60 * 1000,
+  ), // 15 minutes
+  RATE_LIMIT_MAX_REQUESTS: parsePositiveIntegerEnv(
+    process.env.RATE_LIMIT_MAX_REQUESTS,
+    100,
+  ),
   
   // CORS
   CORS_ORIGIN: process.env.CORS_ORIGIN || 'http://localhost:3001',

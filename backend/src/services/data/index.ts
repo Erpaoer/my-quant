@@ -2,6 +2,7 @@ export * from './types';
 export * from './DataManager';
 export * from './adapters/BaseAdapter';
 export * from './adapters/YahooFinanceAdapter';
+export * from './adapters/TushareAdapter';
 export * from './processors/DataProcessor';
 export * from './validators/DataValidator';
 export * from './cache/DataCache';
