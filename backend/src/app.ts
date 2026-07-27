@@ -28,6 +28,7 @@ import dataTestRoutes from './routes/data-simple'
 import tradingLogsRoutes from './routes/trading-logs';
 import multiExchangeRoutes from './routes/multi-exchange';
 import { exchangeService } from './exchanges/ExchangeService';
+import { errorMessage } from './utils/errors';
 
 // Load environment variables
 dotenv.config();
@@ -90,7 +91,7 @@ app.get('/debug-bybit', async (req, res) => {
       const ticker = await exchangeService.getTicker(exchangeId, 'BTC/USDT');
       console.log('✅ getTicker success:', ticker);
     } catch (error) {
-      console.log('❌ getTicker failed:', error.message);
+      console.log('❌ getTicker failed:', errorMessage(error));
     }
     
     // Test getBalance
@@ -99,7 +100,7 @@ app.get('/debug-bybit', async (req, res) => {
       const balance = await exchangeService.getBalance(exchangeId);
       console.log('✅ getBalance success:', balance);
     } catch (error) {
-      console.log('❌ getBalance failed:', error.message);
+      console.log('❌ getBalance failed:', errorMessage(error));
     }
     
     // Test getPositions
@@ -108,7 +109,7 @@ app.get('/debug-bybit', async (req, res) => {
       const positions = await exchangeService.getPositions(exchangeId);
       console.log('✅ getPositions success:', positions);
     } catch (error) {
-      console.log('❌ getPositions failed:', error.message);
+      console.log('❌ getPositions failed:', errorMessage(error));
     }
     
     // Test getOrders
@@ -117,10 +118,10 @@ app.get('/debug-bybit', async (req, res) => {
       const orders = await exchangeService.getOrders(exchangeId);
       console.log('✅ getOrders success:', orders);
     } catch (error) {
-      console.log('❌ getOrders failed:', error.message);
+      console.log('❌ getOrders failed:', errorMessage(error));
     }
     
-    res.json({
+    return res.json({
       success: true,
       message: 'Bybit API debug test completed',
       exchangeId: exchangeId
@@ -128,9 +129,9 @@ app.get('/debug-bybit', async (req, res) => {
     
   } catch (error) {
     console.error('❌ Debug endpoint failed:', error);
-    res.json({
+    return res.json({
       success: false,
-      message: error.message
+      message: errorMessage(error)
     });
   }
 });

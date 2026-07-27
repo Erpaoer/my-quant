@@ -66,7 +66,7 @@ router.post('/register', [
   const token = jwt.sign(
     { id: user.id, email: user.email, username: user.username, role: user.role },
     config.JWT_SECRET,
-    { expiresIn: config.JWT_EXPIRES_IN }
+    { expiresIn: config.JWT_EXPIRES_IN as jwt.SignOptions['expiresIn'] }
   );
 
   // Generate refresh token
@@ -123,7 +123,7 @@ router.post('/login', [
   const token = jwt.sign(
     { id: user.id, email: user.email, username: user.username, role: user.role },
     config.JWT_SECRET,
-    { expiresIn: config.JWT_EXPIRES_IN }
+    { expiresIn: config.JWT_EXPIRES_IN as jwt.SignOptions['expiresIn'] }
   );
 
   // Generate refresh token (same as token for now, but could have different expiration)
@@ -244,7 +244,7 @@ router.post('/refresh', authenticate, asyncHandler(async (req: AuthRequest, res)
   const token = jwt.sign(
     { id: user.id, email: user.email, username: user.username, role: user.role },
     config.JWT_SECRET,
-    { expiresIn: config.JWT_EXPIRES_IN }
+    { expiresIn: config.JWT_EXPIRES_IN as jwt.SignOptions['expiresIn'] }
   );
 
   res.json({

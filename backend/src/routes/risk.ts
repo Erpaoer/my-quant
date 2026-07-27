@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { body, query, param, validationResult } from 'express-validator'
 import { authenticate } from '../middleware/auth'
 import { riskManagementService } from '../services/RiskManagementService'
+import { errorMessage } from '../utils/errors'
 
 const router = Router()
 
@@ -17,7 +18,7 @@ router.get('/rules', authenticate, async (req, res) => {
     res.status(500).json({
       success: false,
       message: '获取风控规则失败',
-      error: error.message
+      error: errorMessage(error)
     })
   }
 })
@@ -54,7 +55,7 @@ router.put('/rules/:id', authenticate, [
     res.status(500).json({
       success: false,
       message: '更新风控规则失败',
-      error: error.message
+      error: errorMessage(error)
     })
   }
 })
@@ -90,7 +91,7 @@ router.post('/assess', authenticate, [
     res.status(500).json({
       success: false,
       message: '风险评估失败',
-      error: error.message
+      error: errorMessage(error)
     })
   }
 })
@@ -122,7 +123,7 @@ router.get('/account/:accountId/status', authenticate, [
     res.status(500).json({
       success: false,
       message: '获取账户风险状态失败',
-      error: error.message
+      error: errorMessage(error)
     })
   }
 })
@@ -156,7 +157,7 @@ router.get('/account/:accountId/report', authenticate, [
     res.status(500).json({
       success: false,
       message: '获取风险报告失败',
-      error: error.message
+      error: errorMessage(error)
     })
   }
 })
@@ -181,7 +182,7 @@ router.get('/overview', authenticate, async (req, res) => {
     res.status(500).json({
       success: false,
       message: '获取风险概览失败',
-      error: error.message
+      error: errorMessage(error)
     })
   }
 })
@@ -217,7 +218,7 @@ router.get('/alerts', authenticate, [
     res.status(500).json({
       success: false,
       message: '获取风险警报失败',
-      error: error.message
+      error: errorMessage(error)
     })
   }
 })
@@ -250,7 +251,7 @@ router.put('/alerts/:alertId/resolve', authenticate, [
     res.status(500).json({
       success: false,
       message: '处理风险警报失败',
-      error: error.message
+      error: errorMessage(error)
     })
   }
 })
@@ -286,7 +287,7 @@ router.get('/config', authenticate, async (req, res) => {
     res.status(500).json({
       success: false,
       message: '获取风险配置失败',
-      error: error.message
+      error: errorMessage(error)
     })
   }
 })
@@ -321,7 +322,7 @@ router.put('/config', authenticate, [
     res.status(500).json({
       success: false,
       message: '更新风险配置失败',
-      error: error.message
+      error: errorMessage(error)
     })
   }
 })

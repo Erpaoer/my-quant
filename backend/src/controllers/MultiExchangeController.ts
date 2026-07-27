@@ -7,7 +7,7 @@ import { ExchangeConfig } from '../exchanges/types';
 declare global {
   namespace Express {
     interface Request {
-      user: {
+      user?: {
         id: string;
         username: string;
         email: string;
@@ -66,7 +66,7 @@ export class MultiExchangeController {
   // 获取用户的交易所账户列表
   async getUserExchanges(req: Request, res: Response): Promise<Response> {
     try {
-      const userId = req.user.id;
+      const userId = req.user!.id;
       
       const accounts = await prisma.account.findMany({
         where: {
@@ -136,7 +136,7 @@ export class MultiExchangeController {
   // 添加交易所账户
   async addExchangeAccount(req: Request, res: Response): Promise<Response> {
     try {
-      const userId = req.user.id;
+      const userId = req.user!.id;
       const {
         name,
         exchange,
@@ -245,7 +245,7 @@ export class MultiExchangeController {
   async connectExchange(req: Request, res: Response): Promise<Response> {
     try {
       const { accountId } = req.params;
-      const userId = req.user.id;
+      const userId = req.user!.id;
 
       // 验证账户所有权
       const account = await prisma.account.findFirst({
@@ -299,7 +299,7 @@ export class MultiExchangeController {
   async disconnectExchange(req: Request, res: Response): Promise<Response> {
     try {
       const { accountId } = req.params;
-      const userId = req.user.id;
+      const userId = req.user!.id;
 
       // 验证账户所有权
       const account = await prisma.account.findFirst({
@@ -346,7 +346,7 @@ export class MultiExchangeController {
   async deleteExchangeAccount(req: Request, res: Response): Promise<Response> {
     try {
       const { accountId } = req.params;
-      const userId = req.user.id;
+      const userId = req.user!.id;
 
       // 验证账户所有权
       const account = await prisma.account.findFirst({
@@ -394,7 +394,7 @@ export class MultiExchangeController {
   async getExchangeAccount(req: Request, res: Response): Promise<Response> {
     try {
       const { accountId } = req.params;
-      const userId = req.user.id;
+      const userId = req.user!.id;
 
       const account = await prisma.account.findFirst({
         where: {
@@ -461,7 +461,7 @@ export class MultiExchangeController {
   async syncExchangeData(req: Request, res: Response): Promise<Response> {
     try {
       const { accountId } = req.params;
-      const userId = req.user.id;
+      const userId = req.user!.id;
 
       // 验证账户所有权
       const account = await prisma.account.findFirst({
@@ -510,7 +510,7 @@ export class MultiExchangeController {
   // 获取多交易所汇总数据
   async getMultiExchangeSummary(req: Request, res: Response): Promise<Response> {
     try {
-      const userId = req.user.id;
+      const userId = req.user!.id;
 
       const accounts = await prisma.account.findMany({
         where: {

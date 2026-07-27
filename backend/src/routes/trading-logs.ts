@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { body, query, param, validationResult } from 'express-validator'
 import { authenticate } from '../middleware/auth'
 import prisma from '../config/database'
+import { errorMessage } from '../utils/errors'
 
 const router = Router()
 
@@ -85,7 +86,7 @@ router.get('/logs', authenticate, [
     res.status(500).json({
       success: false,
       message: '获取交易日志失败',
-      error: error.message
+      error: errorMessage(error)
     })
   }
 })
@@ -151,7 +152,7 @@ router.post('/logs', authenticate, [
     res.status(500).json({
       success: false,
       message: '创建交易日志失败',
-      error: error.message
+      error: errorMessage(error)
     })
   }
 })
@@ -238,7 +239,7 @@ router.get('/logs/stats', authenticate, [
     res.status(500).json({
       success: false,
       message: '获取日志统计失败',
-      error: error.message
+      error: errorMessage(error)
     })
   }
 })
@@ -278,7 +279,7 @@ router.get('/monitoring/overview', authenticate, [
       prisma.order.count({
         where: {
           ...where,
-          createdAt: { gte: last24h }
+          createTime: { gte: last24h }
         }
       }),
       prisma.trade.count({
@@ -361,7 +362,7 @@ router.get('/monitoring/overview', authenticate, [
     res.status(500).json({
       success: false,
       message: '获取监控概览失败',
-      error: error.message
+      error: errorMessage(error)
     })
   }
 })
@@ -412,7 +413,7 @@ router.get('/risk/alerts', authenticate, [
     res.status(500).json({
       success: false,
       message: '获取风险警报失败',
-      error: error.message
+      error: errorMessage(error)
     })
   }
 })
@@ -476,7 +477,7 @@ router.get('/logs/export', authenticate, [
     res.status(500).json({
       success: false,
       message: '导出交易日志失败',
-      error: error.message
+      error: errorMessage(error)
     })
   }
 })
