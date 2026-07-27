@@ -8,10 +8,27 @@ const prisma = new PrismaClient();
 
 console.log('Original backtest routes loaded');
 
+interface SimulatedTrade {
+  timestamp: Date;
+  type: 'buy' | 'sell';
+  price: number;
+  quantity: number;
+  notes: string;
+}
+
+interface SimulatedMarketData {
+  timestamp: Date;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
 // Simple backtest engine (for demonstration)
 class BacktestEngine {
   async runBacktest(strategy: any, marketData: any[], parameters: any) {
-    const trades = [];
+    const trades: SimulatedTrade[] = [];
     let capital = parameters.initialCapital || 10000;
     let position = 0;
     let entryPrice = 0;
@@ -162,14 +179,14 @@ router.post('/start', authenticate, async (req: AuthRequest, res) => {
       }
     });
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Backtest started successfully',
       data: backtest
     });
   } catch (error) {
     console.error('Error starting backtest:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to start backtest',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -221,14 +238,14 @@ router.get('/results/:id', authenticate, async (req: AuthRequest, res) => {
       });
     }
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Backtest results retrieved successfully',
       data: backtest
     });
   } catch (error) {
     console.error('Error fetching backtest results:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to fetch backtest results',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -292,7 +309,7 @@ router.get('/history', authenticate, [
       prisma.backtest.count({ where: whereClause })
     ]);
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Backtest history retrieved successfully',
       data: {
@@ -307,7 +324,7 @@ router.get('/history', authenticate, [
     });
   } catch (error) {
     console.error('Error fetching backtest history:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to fetch backtest history',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -350,7 +367,7 @@ router.get('/stats', authenticate, async (req: AuthRequest, res) => {
       }
     });
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Backtest statistics retrieved successfully',
       data: {
@@ -361,7 +378,7 @@ router.get('/stats', authenticate, async (req: AuthRequest, res) => {
     });
   } catch (error) {
     console.error('Error fetching backtest statistics:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to fetch backtest statistics',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -396,13 +413,13 @@ router.post('/cancel/:id', authenticate, async (req: AuthRequest, res) => {
       }
     });
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Backtest cancelled successfully'
     });
   } catch (error) {
     console.error('Error cancelling backtest:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to cancel backtest',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -411,8 +428,8 @@ router.post('/cancel/:id', authenticate, async (req: AuthRequest, res) => {
 });
 
 // Helper function to generate mock market data
-function generateMockMarketData(startDate: Date, endDate: Date) {
-  const data = [];
+function generateMockMarketData(startDate: Date, endDate: Date): SimulatedMarketData[] {
+  const data: SimulatedMarketData[] = [];
   const current = new Date(startDate);
   const end = new Date(endDate);
   

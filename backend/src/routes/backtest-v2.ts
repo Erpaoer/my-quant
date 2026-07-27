@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { PrismaClient } from '@prisma/client';
 import { body, query, validationResult } from 'express-validator';
+import { jsonObject } from '../utils/json';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -68,7 +69,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
           where: { id: backtest.id },
           data: { 
             parameters: {
-              ...backtest.parameters,
+              ...jsonObject(backtest.parameters),
               progress: 0.25,
               currentStep: 'Loading market data'
             }
@@ -82,7 +83,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
           where: { id: backtest.id },
           data: { 
             parameters: {
-              ...backtest.parameters,
+              ...jsonObject(backtest.parameters),
               progress: 0.5,
               currentStep: 'Running strategy'
             }
@@ -95,7 +96,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
           where: { id: backtest.id },
           data: { 
             parameters: {
-              ...backtest.parameters,
+              ...jsonObject(backtest.parameters),
               progress: 0.75,
               currentStep: 'Calculating results'
             }
@@ -141,7 +142,20 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
         });
 
         // Generate some sample trades
-        const trades = [];
+        const trades: Array<{
+          symbol: string;
+          type: string;
+          side: string;
+          quantity: number;
+          price: number;
+          timestamp: Date;
+          status: string;
+          commission: number;
+          slippage: number;
+          pnl: number;
+          profit: number;
+          notes: string;
+        }> = [];
         for (let i = 0; i < Math.floor(Math.random() * 10) + 5; i++) {
           const isBuy = i % 2 === 0;
           trades.push({
@@ -179,7 +193,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
           data: { 
             status: 'failed',
             parameters: {
-              ...backtest.parameters,
+              ...jsonObject(backtest.parameters),
               currentStep: 'Failed',
               error: error instanceof Error ? error.message : 'Unknown error'
             }
@@ -188,14 +202,14 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       }
     });
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Backtest started successfully',
       data: backtest
     });
   } catch (error) {
     console.error('Error starting backtest:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to start backtest',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -251,14 +265,14 @@ router.get('/:id', authenticate, async (req: AuthRequest, res) => {
       });
     }
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Backtest retrieved successfully',
       data: backtest
     });
   } catch (error) {
     console.error('Error fetching backtest:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to fetch backtest',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -322,7 +336,7 @@ router.get('/', authenticate, [
       prisma.backtest.count({ where: whereClause })
     ]);
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Backtest history retrieved successfully',
       data: {
@@ -337,7 +351,7 @@ router.get('/', authenticate, [
     });
   } catch (error) {
     console.error('Error fetching backtest history:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to fetch backtest history',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -380,7 +394,7 @@ router.get('/stats', authenticate, async (req: AuthRequest, res) => {
       }
     });
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Backtest statistics retrieved successfully',
       data: {
@@ -391,7 +405,7 @@ router.get('/stats', authenticate, async (req: AuthRequest, res) => {
     });
   } catch (error) {
     console.error('Error fetching backtest statistics:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to fetch backtest statistics',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -424,19 +438,19 @@ router.post('/:id/cancel', authenticate, async (req: AuthRequest, res) => {
       data: {
         status: 'cancelled',
         parameters: {
-          ...backtest.parameters,
+          ...jsonObject(backtest.parameters),
           currentStep: 'Cancelled'
         }
       }
     });
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Backtest cancelled successfully'
     });
   } catch (error) {
     console.error('Error cancelling backtest:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to cancel backtest',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -499,7 +513,7 @@ router.get('/:id/trades', authenticate, [
       })
     ]);
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Backtest trades retrieved successfully',
       data: {
@@ -514,7 +528,7 @@ router.get('/:id/trades', authenticate, [
     });
   } catch (error) {
     console.error('Error fetching backtest trades:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to fetch backtest trades',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -560,14 +574,14 @@ router.get('/templates', authenticate, async (req: AuthRequest, res) => {
       }
     ];
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Backtest templates retrieved successfully',
       data: templates
     });
   } catch (error) {
     console.error('Error fetching backtest templates:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to fetch backtest templates',
       error: error instanceof Error ? error.message : 'Unknown error'

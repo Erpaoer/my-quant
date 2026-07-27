@@ -39,7 +39,7 @@ data routes (19), and real-time trading (15). Backend tests currently pass 20/20
 
 ### Task 4: Repair route and service type safety by domain
 
-- [ ] Backtest controllers and routes: return paths, error narrowing, typed arrays.
+- [x] Backtest controllers and routes: return paths, error narrowing, typed arrays.
 - [ ] Data routes and manager: request query narrowing, awaited promises, typed
   indicator and market-data arrays.
 - [ ] Trading routes, logs, and sockets: nullable account identifiers, order model
