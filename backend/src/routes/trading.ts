@@ -4,6 +4,7 @@ import { PrismaClient } from '@prisma/client';
 import { body, query, validationResult } from 'express-validator';
 import { riskManagementService } from '../services/RiskManagementService';
 import { exchangeService } from '../exchanges/ExchangeService';
+import { errorMessage } from '../utils/errors';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -24,7 +25,7 @@ router.get('/accounts', authenticate, async (req: AuthRequest, res) => {
         type: true,
         balance: true,
         currency: true,
-        broker: true,
+        exchange: true,
         isActive: true,
         createdAt: true,
         updatedAt: true
@@ -37,7 +38,10 @@ router.get('/accounts', authenticate, async (req: AuthRequest, res) => {
     res.json({
       success: true,
       message: 'Trading accounts retrieved successfully',
-      data: accounts
+      data: accounts.map(({ exchange, ...account }) => ({
+        ...account,
+        broker: exchange
+      }))
     });
   } catch (error) {
     console.error('Error fetching trading accounts:', error);
@@ -78,14 +82,14 @@ router.get('/accounts/:id', authenticate, async (req: AuthRequest, res) => {
       });
     }
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Account details retrieved successfully',
       data: account
     });
   } catch (error) {
     console.error('Error fetching account details:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to fetch account details',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -219,7 +223,7 @@ router.get('/positions', authenticate, async (req: AuthRequest, res) => {
         console.log(`💰 Calculated PnL for ${position.symbol}: $${position.pnl} (${position.pnlPercentage.toFixed(2)}%)`);
         
       } catch (error) {
-        console.log(`❌ Failed to get market data for ${position.symbol}, using entry price:`, error.message);
+        console.log(`❌ Failed to get market data for ${position.symbol}, using entry price:`, errorMessage(error));
         position.currentPrice = position.entryPrice;
         position.pnl = 0;
         position.pnlPercentage = 0;
@@ -382,7 +386,7 @@ router.post('/order', authenticate, [
     });
 
     // Execute real order via exchange API
-    const targetExchangeId = account.accountId; // Use the account's exchange ID directly
+    const targetExchangeId = account.exchange;
     let exchangeOrderData: any = {};
     
     console.log('🎯 Using exchange ID:', targetExchangeId);
@@ -424,11 +428,11 @@ router.post('/order', authenticate, [
       console.log('  - Symbol:', exchangeOrder.symbol);
       console.log('  - Type:', exchangeOrder.type);
       console.log('  - Side:', exchangeOrder.side);
-      console.log('  - Quantity:', exchangeOrder.quantity);
+      console.log('  - Quantity:', exchangeOrder.amount);
       console.log('  - Price:', exchangeOrder.price);
-      console.log('  - Filled Quantity:', exchangeOrder.filledQuantity);
-      console.log('  - Average Price:', exchangeOrder.averagePrice);
-      console.log('  - Commission:', exchangeOrder.commission, exchangeOrder.feeCurrency);
+      console.log('  - Filled Quantity:', exchangeOrder.filled);
+      console.log('  - Average Price:', exchangeOrder.average);
+      console.log('  - Commission:', exchangeOrder.fee, exchangeOrder.feeCurrency);
       console.log('  - Create Time:', exchangeOrder.createTime);
       console.log('  - Update Time:', exchangeOrder.updateTime);
       console.log('  - Full metadata:', JSON.stringify(exchangeOrder.metadata, null, 2));
@@ -437,17 +441,17 @@ router.post('/order', authenticate, [
       await prisma.trade.update({
         where: { id: trade.id },
         data: {
-          status: exchangeOrder.status === 'closed' || exchangeOrder.status === 'filled' ? 'executed' : 'pending',
-          price: exchangeOrder.averagePrice || exchangeOrder.price || parseFloat(finalOrderData.price) || 0,
-          commission: exchangeOrder.commission || 0,
+          status: exchangeOrder.status === 'filled' ? 'executed' : 'pending',
+          price: exchangeOrder.average || exchangeOrder.price || parseFloat(finalOrderData.price) || 0,
+          commission: exchangeOrder.fee || 0,
           pnl: side === 'buy' ? 0 : 0, // PnL calculated on close
           notes: JSON.stringify({
             ...JSON.parse(trade.notes || '{}'),
             exchangeOrderId: exchangeOrder.exchangeId,
             exchangeStatus: exchangeOrder.status,
-            filledQuantity: exchangeOrder.filledQuantity,
-            averagePrice: exchangeOrder.averagePrice,
-            commission: exchangeOrder.commission,
+            filledQuantity: exchangeOrder.filled,
+            averagePrice: exchangeOrder.average,
+            commission: exchangeOrder.fee,
             feeCurrency: exchangeOrder.feeCurrency
           })
         }
@@ -457,8 +461,17 @@ router.post('/order', authenticate, [
     } catch (error) {
       console.error('❌ Error executing real order via API!');
       console.error('📊 Error details:');
-      console.error('  - Error message:', error instanceof Error ? error.message : 'Unknown error');
-      console.error('  - Error type:', error.constructor.name);
+      const executionError = error instanceof Error
+        ? error
+        : new Error(errorMessage(error));
+      const errorDetails = (
+        typeof error === 'object' && error !== null ? error : {}
+      ) as {
+        response?: { status?: number; data?: unknown };
+        request?: unknown;
+      };
+      console.error('  - Error message:', executionError.message);
+      console.error('  - Error type:', executionError.name);
       console.error('  - Exchange ID:', targetExchangeId || 'undefined');
       console.error('  - Order Data:', JSON.stringify(exchangeOrderData || {}, null, 2));
       
@@ -468,30 +481,30 @@ router.post('/order', authenticate, [
       }
       
       // Check for specific error types
-      if ('response' in error) {
-        console.error('  - HTTP Response Status:', error.response?.status);
-        console.error('  - HTTP Response Data:', JSON.stringify(error.response?.data, null, 2));
+      if (errorDetails.response) {
+        console.error('  - HTTP Response Status:', errorDetails.response.status);
+        console.error('  - HTTP Response Data:', JSON.stringify(errorDetails.response.data, null, 2));
       }
       
-      if ('request' in error) {
-        console.error('  - Request details:', error.request);
+      if (errorDetails.request) {
+        console.error('  - Request details:', errorDetails.request);
       }
       
-      console.error('  - Full error object:', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
+      console.error('  - Full error object:', JSON.stringify(error, Object.getOwnPropertyNames(executionError), 2));
       
       // Handle specific error types with user-friendly messages
       let userErrorMessage = 'Unknown execution error';
       let errorCategory = 'unknown';
       let shouldFallbackToSimulation = false;
       
-      if (error.message?.includes('regulatory restrictions') || error.message?.includes('retCode":10024')) {
+      if (executionError.message.includes('regulatory restrictions') || executionError.message.includes('retCode":10024')) {
         userErrorMessage = '交易服务因监管限制暂时不可用，已切换到模拟交易模式。';
         errorCategory = 'regulatory';
         shouldFallbackToSimulation = true;
-      } else if (error.message?.includes('insufficient') || error.message?.includes('balance')) {
+      } else if (executionError.message.includes('insufficient') || executionError.message.includes('balance')) {
         userErrorMessage = '账户余额不足，请充值后重试。';
         errorCategory = 'insufficient_balance';
-      } else if (error.message?.includes('permission') || error.message?.includes('unauthorized')) {
+      } else if (executionError.message.includes('permission') || executionError.message.includes('unauthorized')) {
         userErrorMessage = '账户权限不足，请检查API密钥配置。';
         errorCategory = 'permission';
       }
@@ -520,7 +533,7 @@ router.post('/order', authenticate, [
               executionReason: 'regulatory_restriction_fallback',
               simulatedPrice,
               simulatedCommission,
-              regulatoryError: error.message,
+              regulatoryError: executionError.message,
               fallbackAt: new Date().toISOString()
             })
           }
@@ -549,7 +562,7 @@ router.post('/order', authenticate, [
           notes: JSON.stringify({
             ...JSON.parse(trade.notes || '{}'),
             executionError: userErrorMessage,
-            errorType: error.constructor.name,
+            errorType: executionError.name,
             errorCategory: errorCategory,
             exchangeId: targetExchangeId,
             failedAt: new Date().toISOString(),
@@ -563,7 +576,7 @@ router.post('/order', authenticate, [
         success: false,
         message: userErrorMessage,
         error: {
-          type: error.constructor.name,
+          type: executionError.name,
           category: errorCategory,
           exchange: errorExchangeId
         }
@@ -915,14 +928,14 @@ router.get('/balance', authenticate, async (req: AuthRequest, res) => {
       lastUpdated: new Date()
     };
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Balance retrieved successfully',
       data: balanceData
     });
   } catch (error) {
     console.error('Error fetching balance:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to fetch balance',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -1466,14 +1479,14 @@ router.get('/positions/by-account', authenticate, async (req: AuthRequest, res) 
       }
     ];
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Positions retrieved successfully',
       data: positions
     });
   } catch (error) {
     console.error('Error fetching positions:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to fetch positions',
       error: error instanceof Error ? error.message : 'Unknown error'

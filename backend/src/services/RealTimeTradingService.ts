@@ -66,14 +66,8 @@ export class RealTimeTradingService extends EventEmitter {
   }
 
   private async loadTradingConfigs(): Promise<void> {
-    try {
-      const configs = await prisma.tradingConfig.findMany();
-      configs.forEach(config => {
-        this.tradingConfigs.set(config.accountId, config.config as TradingConfig);
-      });
-    } catch (error) {
-      console.error('Error loading trading configs:', error);
-    }
+    // TradingConfig is currently runtime-only; the Prisma schema has no
+    // persisted trading configuration model.
   }
 
   async executeTrade(accountId: string, signal: TradeSignal): Promise<any> {
@@ -230,30 +224,33 @@ export class RealTimeTradingService extends EventEmitter {
     }
   }
 
-  private async handleOrderUpdate(event: any): void {
+  private async handleOrderUpdate(event: any): Promise<void> {
     try {
       const { exchange, data } = event;
       
       // 更新数据库中的订单状态
+      const account = await prisma.account.findFirst({
+        where: { exchange }
+      });
+      if (!account) return;
+
       await prisma.order.updateMany({
         where: {
-          accountId: exchange,
-          exchangeOrderId: data.id
+          accountId: account.id,
+          exchangeId: data.id
         },
         data: {
           status: data.status,
-          filled: data.filled?.toString(),
-          remaining: data.remaining?.toString(),
-          average: data.average?.toString(),
-          cost: data.cost?.toString(),
-          fee: data.fee?.toString(),
-          updatedAt: new Date()
+          filledQuantity: data.filled ?? 0,
+          averagePrice: data.average,
+          commission: data.fee,
+          updateTime: new Date()
         }
       });
 
       // 如果订单完成，创建交易记录
       if (data.status === 'closed' || data.status === 'filled') {
-        await this.createTradeRecord(exchange, data);
+        await this.createTradeRecord(account.id, data);
       }
 
       this.emit('order_updated', event);
@@ -262,19 +259,23 @@ export class RealTimeTradingService extends EventEmitter {
     }
   }
 
-  private async handlePositionUpdate(event: any): void {
+  private async handlePositionUpdate(event: any): Promise<void> {
     try {
       const { exchange, data } = event;
       
       // 更新数据库中的持仓
-      await prisma.position.upsert({
-        where: {
-          accountId_symbol: {
-            accountId: exchange,
-            symbol: data.symbol
-          }
-        },
-        update: {
+      const account = await prisma.account.findFirst({
+        where: { exchange }
+      });
+      if (!account) return;
+
+      const existing = await prisma.position.findFirst({
+        where: { accountId: account.id, symbol: data.symbol, status: 'open' }
+      });
+      if (existing) {
+        await prisma.position.update({
+          where: { id: existing.id },
+          data: {
           side: data.side,
           size: data.size,
           entryPrice: data.entryPrice,
@@ -285,9 +286,12 @@ export class RealTimeTradingService extends EventEmitter {
           margin: data.margin,
           liquidationPrice: data.liquidationPrice,
           updatedAt: new Date()
-        },
-        create: {
-          accountId: exchange,
+          }
+        });
+      } else {
+        await prisma.position.create({
+          data: {
+          accountId: account.id,
           symbol: data.symbol,
           side: data.side,
           size: data.size,
@@ -299,8 +303,9 @@ export class RealTimeTradingService extends EventEmitter {
           margin: data.margin,
           liquidationPrice: data.liquidationPrice,
           status: 'open'
-        }
-      });
+          }
+        });
+      }
 
       this.emit('position_updated', event);
     } catch (error) {
@@ -308,33 +313,41 @@ export class RealTimeTradingService extends EventEmitter {
     }
   }
 
-  private async handleBalanceUpdate(event: any): void {
+  private async handleBalanceUpdate(event: any): Promise<void> {
     try {
       const { exchange, data } = event;
       
       // 更新数据库中的余额
+      const account = await prisma.account.findFirst({
+        where: { exchange }
+      });
+      if (!account) return;
+
       for (const balance of data) {
-        await prisma.balance.upsert({
-          where: {
-            accountId_asset: {
-              accountId: exchange,
-              asset: balance.asset
-            }
-          },
-          update: {
+        const existing = await prisma.balance.findFirst({
+          where: { accountId: account.id, asset: balance.asset }
+        });
+        if (existing) {
+          await prisma.balance.update({
+            where: { id: existing.id },
+            data: {
             free: balance.free,
-            used: balance.used,
+            locked: balance.used,
             total: balance.total,
-            updatedAt: new Date()
-          },
-          create: {
-            accountId: exchange,
+            lastUpdated: new Date()
+            }
+          });
+        } else {
+          await prisma.balance.create({
+            data: {
+            accountId: account.id,
             asset: balance.asset,
             free: balance.free,
-            used: balance.used,
+            locked: balance.used,
             total: balance.total
-          }
-        });
+            }
+          });
+        }
       }
 
       this.emit('balance_updated', event);
@@ -393,22 +406,31 @@ export class RealTimeTradingService extends EventEmitter {
 
   private async recordTrade(accountId: string, tradeData: any): Promise<void> {
     try {
+      const account = await prisma.account.findUnique({
+        where: { id: accountId }
+      });
+      if (!account) return;
+      const strategy = await this.getOrCreateManualStrategy(account.userId);
+
       await prisma.trade.create({
         data: {
           accountId,
+          strategyId: strategy.id,
+          userId: account.userId,
           symbol: tradeData.symbol,
           type: tradeData.type,
-          side: tradeData.side,
-          amount: tradeData.amount.toString(),
-          price: tradeData.price?.toString(),
+          side: tradeData.side === 'buy' ? 'long' : 'short',
+          quantity: Number(tradeData.amount ?? 0),
+          price: Number(tradeData.average ?? tradeData.price ?? 0),
           status: tradeData.status,
-          strategy: tradeData.strategy,
-          confidence: tradeData.confidence,
-          metadata: {
+          timestamp: new Date(),
+          notes: JSON.stringify({
+            strategy: tradeData.strategy,
+            confidence: tradeData.confidence,
             riskAssessment: tradeData.riskAssessment,
             signal: tradeData.signal,
             exchangeOrderId: tradeData.id
-          }
+          })
         }
       });
     } catch (error) {
@@ -426,8 +448,7 @@ export class RealTimeTradingService extends EventEmitter {
         },
         data: {
           status: 'closed',
-          closeReason: reason,
-          closedAt: new Date()
+          updatedAt: new Date()
         }
       });
     } catch (error) {
@@ -437,21 +458,29 @@ export class RealTimeTradingService extends EventEmitter {
 
   private async createTradeRecord(accountId: string, order: any): Promise<void> {
     try {
+      const account = await prisma.account.findUnique({
+        where: { id: accountId }
+      });
+      if (!account) return;
+      const strategy = await this.getOrCreateManualStrategy(account.userId);
+
       await prisma.trade.create({
         data: {
           accountId,
+          strategyId: strategy.id,
+          userId: account.userId,
           symbol: order.symbol,
           type: order.type,
-          side: order.side,
-          amount: order.filled?.toString() || order.amount.toString(),
-          price: order.average?.toString() || order.price?.toString(),
+          side: order.side === 'buy' ? 'long' : 'short',
+          quantity: Number(order.filled ?? order.amount ?? 0),
+          price: Number(order.average ?? order.price ?? 0),
           status: 'completed',
-          fee: order.fee?.toString(),
-          feeCurrency: order.feeCurrency,
-          metadata: {
+          commission: order.fee,
+          timestamp: new Date(),
+          notes: JSON.stringify({
             exchangeOrderId: order.id,
             completedAt: new Date()
-          }
+          })
         }
       });
     } catch (error) {
@@ -473,13 +502,30 @@ export class RealTimeTradingService extends EventEmitter {
       });
 
       return trades.reduce((pnl, trade) => {
-        const tradePnl = parseFloat(trade.metadata?.pnl || '0');
-        return pnl + tradePnl;
+        return pnl + (trade.pnl ?? 0);
       }, 0);
     } catch (error) {
       console.error('Error calculating daily PnL:', error);
       return 0;
     }
+  }
+
+  private async getOrCreateManualStrategy(userId: string) {
+    const existing = await prisma.strategy.findFirst({
+      where: { userId, name: 'Manual Trading' }
+    });
+    if (existing) return existing;
+
+    return prisma.strategy.create({
+      data: {
+        name: 'Manual Trading',
+        description: 'Trades created by the real-time trading service',
+        code: '// Runtime-managed manual trading strategy',
+        type: 'manual',
+        status: 'active',
+        userId
+      }
+    });
   }
 }
 
@@ -555,16 +601,7 @@ class RiskManager {
       cooldownPeriod: 5
     };
 
-    try {
-      const config = await prisma.tradingConfig.findUnique({
-        where: { accountId }
-      });
-
-      return config ? (config.config as TradingConfig) : defaultConfig;
-    } catch (error) {
-      console.error('Error getting trading config:', error);
-      return defaultConfig;
-    }
+    return defaultConfig;
   }
 
   private async getDailyPnL(accountId: string): Promise<number> {
