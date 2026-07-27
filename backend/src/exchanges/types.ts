@@ -216,6 +216,7 @@ export interface ExchangeInfo {
   requiredCredentials: {
     apiKey: boolean;                  // 是否需要API Key
     secret: boolean;                   // 是否需要Secret
+    passphrase?: boolean;             // 是否需要API Passphrase
     uid?: boolean;                     // 是否需要UID
     login?: boolean;                   // 是否需要登录
     password?: boolean;                // 是否需要密码
@@ -267,7 +268,8 @@ export type ExchangeEventType =
   | 'balance_update'
   | 'ticker_update'
   | 'trade_update'
-  | 'orderbook_update';
+  | 'orderbook_update'
+  | 'kline_update';
 
 export interface ExchangeEvent {
   type: ExchangeEventType;

@@ -1,8 +1,56 @@
 import { BaseExchange } from '../base/BaseExchange';
-import { ExchangeConfig } from '../types';
+import {
+  Balance,
+  ExchangeConfig,
+  ExchangeInfo,
+  SubscriptionOptions
+} from '../types';
 import ccxt from 'ccxt';
-import axios from 'axios';
+import axios, { type AxiosInstance } from 'axios';
 import { HttpsProxyAgent } from 'https-proxy-agent';
+
+interface BybitWalletCoin {
+  coin?: string;
+  walletBalance?: string;
+  availableToWithdraw?: string;
+  usdValue?: string;
+}
+
+interface BybitWalletResponse {
+  retCode: number;
+  retMsg?: string;
+  result?: {
+    list?: Array<{
+      coin?: BybitWalletCoin[];
+      totalEquity?: string;
+      availableBalance?: string;
+    }>;
+  };
+}
+
+interface CcxtBalanceResponse {
+  total: Record<string, number>;
+  free?: Record<string, number>;
+  used?: Record<string, number>;
+}
+
+type BybitBalanceResponse = BybitWalletResponse | CcxtBalanceResponse;
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function hasRetCode(
+  response: BybitBalanceResponse
+): response is BybitWalletResponse {
+  return 'retCode' in response;
+}
+
+function isCcxtBalance(
+  response: BybitBalanceResponse
+): response is CcxtBalanceResponse {
+  return 'total' in response;
+}
 
 export class BybitAdapter extends BaseExchange {
   private exchange: InstanceType<typeof ccxt.bybit>;
@@ -44,17 +92,68 @@ export class BybitAdapter extends BaseExchange {
     this.exchange = new ccxt.bybit(exchangeConfig);
   }
 
+  async getExchangeInfo(): Promise<ExchangeInfo> {
+    return {
+      id: 'bybit',
+      name: 'Bybit',
+      version: 'v5',
+      supportedTypes: ['spot', 'swap', 'future'],
+      features: {
+        spot: true,
+        margin: true,
+        swap: true,
+        future: true,
+        createMarketOrder: Boolean(this.exchange.has.createMarketOrder),
+        createLimitOrder: Boolean(this.exchange.has.createLimitOrder),
+        createStopOrder: Boolean(this.exchange.has.createStopOrder),
+        createStopLimitOrder: Boolean(this.exchange.has.createStopLimitOrder),
+        cancelOrder: Boolean(this.exchange.has.cancelOrder),
+        cancelAllOrders: Boolean(this.exchange.has.cancelAllOrders),
+        editOrder: Boolean(this.exchange.has.editOrder),
+        fetchOrder: Boolean(this.exchange.has.fetchOrder),
+        fetchOrders: Boolean(this.exchange.has.fetchOrders),
+        fetchOpenOrders: Boolean(this.exchange.has.fetchOpenOrders),
+        fetchClosedOrders: Boolean(this.exchange.has.fetchClosedOrders),
+        fetchMyTrades: Boolean(this.exchange.has.fetchMyTrades),
+        fetchBalance: Boolean(this.exchange.has.fetchBalance),
+        fetchPositions: Boolean(this.exchange.has.fetchPositions),
+        fetchMarkets: Boolean(this.exchange.has.fetchMarkets),
+        fetchTicker: Boolean(this.exchange.has.fetchTicker),
+        fetchTickers: Boolean(this.exchange.has.fetchTickers),
+        fetchOrderBook: Boolean(this.exchange.has.fetchOrderBook),
+        fetchOHLCV: Boolean(this.exchange.has.fetchOHLCV)
+      },
+      urls: {
+        api: 'https://api.bybit.com',
+        www: 'https://www.bybit.com',
+        doc: 'https://bybit-exchange.github.io/docs/v5/intro',
+        test: 'https://api-testnet.bybit.com'
+      },
+      requiredCredentials: {
+        apiKey: true,
+        secret: true
+      },
+      rateLimits: [],
+      apiStandards: {
+        version: 'v5',
+        rest: true,
+        websocket: false,
+        fix: false
+      }
+    };
+  }
+
   async testConnection(): Promise<boolean> {
     try {
       console.log('🔗 Testing Bybit connection...');
       
       // First test: Basic API connectivity with axios
       const proxyUrl = process.env.http_proxy || process.env.https_proxy;
-      const baseUrl = this.exchange.testnet ? 'https://api-testnet.bybit.com' : 'https://api.bybit.com';
+      const baseUrl = this.config.testnet ? 'https://api-testnet.bybit.com' : 'https://api.bybit.com';
       
       console.log(`🔗 Testing basic connectivity to: ${baseUrl}/v5/market/time`);
       
-      let axiosInstance;
+      let axiosInstance: AxiosInstance;
       if (proxyUrl) {
         console.log('🔗 Using proxy:', proxyUrl);
         const proxyAgent = new HttpsProxyAgent(proxyUrl);
@@ -93,10 +192,13 @@ export class BybitAdapter extends BaseExchange {
       try {
         console.log('📡 Calling this.exchange.fetchTime()...');
         const time = await this.exchange.fetchTime();
+        if (typeof time !== 'number') {
+          throw new Error('Bybit did not return a server timestamp');
+        }
         console.log('✅ CCXT connection test passed:', new Date(time).toISOString());
         ccxtConnected = true;
       } catch (ccxtError) {
-        console.log('⚠️  CCXT connection failed:', ccxtError.message);
+        console.log('⚠️  CCXT connection failed:', errorMessage(ccxtError));
         
         // Try without proxy if proxy is configured
         const proxyUrl = process.env.http_proxy || process.env.https_proxy;
@@ -114,13 +216,16 @@ export class BybitAdapter extends BaseExchange {
             
             console.log('   📡 Calling this.exchange.fetchTime() without proxy...');
             const time2 = await this.exchange.fetchTime();
+            if (typeof time2 !== 'number') {
+              throw new Error('Bybit did not return a server timestamp');
+            }
             console.log('✅ CCXT connection test passed (without proxy):', new Date(time2).toISOString());
             ccxtConnected = true;
             
             // Keep the no-proxy configuration
             console.log('   💾 Keeping no-proxy configuration for this session');
           } catch (fallbackError) {
-            console.log('❌ CCXT without proxy also failed:', fallbackError.message);
+            console.log('❌ CCXT without proxy also failed:', errorMessage(fallbackError));
             // We'll continue with basic connectivity working
             ccxtConnected = true;
           }
@@ -138,17 +243,17 @@ export class BybitAdapter extends BaseExchange {
           console.log('✅ Account access test passed');
         } catch (balanceError) {
           console.log('⚠️  Account access failed, but basic connectivity works');
-          console.log('   Balance Error:', balanceError.message);
+          console.log('   Balance Error:', errorMessage(balanceError));
           // Don't fail the connection test for balance issues
         }
       }
       
       return ccxtConnected;
     } catch (error) {
-      console.error('❌ Bybit connection test failed:', error.message);
-      if (error.response) {
-        console.error('   Status:', error.response.status);
-        console.error('   Data:', error.response.data);
+      console.error('❌ Bybit connection test failed:', errorMessage(error));
+      if (axios.isAxiosError(error)) {
+        console.error('   Status:', error.response?.status);
+        console.error('   Data:', error.response?.data);
       }
       return false;
     }
@@ -183,17 +288,17 @@ export class BybitAdapter extends BaseExchange {
       console.log('🔍 Fetching Bybit Unified Trading Account balance...');
       
       // Try multiple approaches to get the unified account balance
-      let response;
+      let response: BybitBalanceResponse | undefined;
       
       // Approach 1: Try the direct API approach (most reliable)
       try {
         console.log('📡 Approach 1: Direct API call to /v5/account/wallet-balance');
         
         const proxyUrl = process.env.http_proxy || process.env.https_proxy;
-        const baseUrl = this.exchange.testnet ? 'https://api-testnet.bybit.com' : 'https://api.bybit.com';
+        const baseUrl = this.config.testnet ? 'https://api-testnet.bybit.com' : 'https://api.bybit.com';
         
         // Create axios instance with proxy
-        let axiosInstance;
+        let axiosInstance: AxiosInstance;
         if (proxyUrl) {
           const HttpsProxyAgent = require('https-proxy-agent');
           const proxyAgent = new HttpsProxyAgent(proxyUrl);
@@ -219,14 +324,17 @@ export class BybitAdapter extends BaseExchange {
         const crypto = require('crypto');
         const timestamp = Date.now();
         const recv_window = 5000;
-        const params = { accountType: 'UNIFIED', recv_window };
+        const params = {
+          accountType: 'UNIFIED',
+          recv_window: recv_window.toString()
+        };
         const paramString = new URLSearchParams(params).toString();
         const path = '/v5/account/wallet-balance';
         const queryString = paramString ? `${path}?${paramString}` : path;
         const signString = timestamp + 'GET' + queryString;
         const signature = crypto.createHmac('sha256', this.exchange.secret).update(signString, 'utf8').digest('hex');
         
-        const apiResponse = await axiosInstance.get(`${baseUrl}/v5/account/wallet-balance`, {
+        const apiResponse = await axiosInstance.get<BybitWalletResponse>(`${baseUrl}/v5/account/wallet-balance`, {
           params: {
             accountType: 'UNIFIED',
             recv_window: recv_window
@@ -247,36 +355,36 @@ export class BybitAdapter extends BaseExchange {
         }
         
       } catch (error) {
-        console.log('⚠️  Direct API approach failed:', error.message);
+        console.log('⚠️  Direct API approach failed:', errorMessage(error));
         
         // Approach 2: Try CCXT fetch method
         try {
           console.log('📡 Approach 2: CCXT fetch method');
           response = await this.exchange.fetch('GET', '/v5/account/wallet-balance', {
             accountType: 'UNIFIED'
-          });
+          }) as BybitWalletResponse;
           console.log('✅ Using CCXT fetch approach');
         } catch (error2) {
-          console.log('⚠️  CCXT fetch approach failed:', error2.message);
+          console.log('⚠️  CCXT fetch approach failed:', errorMessage(error2));
           
           // Approach 3: Try the default fetchBalance with unified options
           try {
             console.log('📡 Approach 3: CCXT fetchBalance with unified type');
             response = await this.exchange.fetchBalance({
               type: 'unified'
-            });
+            }) as unknown as CcxtBalanceResponse;
             console.log('✅ Using fetchBalance with unified type');
           } catch (error3) {
-            console.log('⚠️  Unified fetchBalance failed:', error3.message);
+            console.log('⚠️  Unified fetchBalance failed:', errorMessage(error3));
             
             // Approach 4: Try default fetchBalance
             try {
               console.log('📡 Approach 4: Default fetchBalance');
-              response = await this.exchange.fetchBalance();
+              response = await this.exchange.fetchBalance() as unknown as CcxtBalanceResponse;
               console.log('✅ Using default fetchBalance');
             } catch (error4) {
               console.log('❌ All balance fetching approaches failed');
-              throw new Error('All balance fetching methods failed. Last error: ' + error4.message);
+              throw new Error('All balance fetching methods failed. Last error: ' + errorMessage(error4));
             }
           }
         }
@@ -285,10 +393,14 @@ export class BybitAdapter extends BaseExchange {
       console.log('📊 Balance response type:', typeof response);
       console.log('📊 Balance response keys:', Object.keys(response || {}));
       
-      const result = [];
+      if (!response) {
+        throw new Error('Bybit returned no balance response');
+      }
+
+      const result: Balance[] = [];
       
       // Handle different response formats
-      if (response && response.retCode !== undefined) {
+      if (hasRetCode(response)) {
         // Bybit V5 API response format
         if (response.retCode !== 0) {
           throw new Error(`Bybit API Error: ${response.retMsg}`);
@@ -300,9 +412,10 @@ export class BybitAdapter extends BaseExchange {
           
           if (account.coin && account.coin.length > 0) {
             for (const coin of account.coin) {
-              const walletBalance = parseFloat(coin.walletBalance || 0);
-              const availableToWithdraw = parseFloat(coin.availableToWithdraw || 0);
-              const usdValue = parseFloat(coin.usdValue || 0);
+              if (!coin.coin) continue;
+              const walletBalance = Number(coin.walletBalance || 0);
+              const availableToWithdraw = Number(coin.availableToWithdraw || 0);
+              const usdValue = Number(coin.usdValue || 0);
               
               if (walletBalance > 0 || usdValue > 0) {
                 result.push({
@@ -320,7 +433,7 @@ export class BybitAdapter extends BaseExchange {
           console.log(`   Total Equity: ${account.totalEquity || '0.00'}`);
           console.log(`   Available Balance: ${account.availableBalance || '0.00'}`);
         }
-      } else if (response && response.total !== undefined) {
+      } else if (isCcxtBalance(response)) {
         // CCXT standard balance format
         console.log('📊 Processing CCXT standard balance format');
         
@@ -328,10 +441,10 @@ export class BybitAdapter extends BaseExchange {
           if (data > 0) {
             result.push({
               asset,
-              free: response.free[asset] || 0,
-              used: response.used[asset] || 0,
+              free: response.free?.[asset] || 0,
+              used: response.used?.[asset] || 0,
               total: data,
-              valueInUSD: data * (this.exchange.markets[`${asset}/USDT`]?.last || 1)
+              valueInUSD: asset === 'USDT' || asset === 'USDC' ? data : undefined
             });
           }
         }
@@ -345,7 +458,7 @@ export class BybitAdapter extends BaseExchange {
       return result;
     } catch (error) {
       console.error('Failed to fetch Bybit balance:', error);
-      console.error('Error details:', error.message);
+      console.error('Error details:', errorMessage(error));
       throw error;
     }
   }
@@ -356,15 +469,17 @@ export class BybitAdapter extends BaseExchange {
       return positions.map(pos => ({
         symbol: pos.symbol,
         side: pos.side === 'long' ? 'long' : 'short',
-        size: pos.contracts || pos.size,
+        size: pos.contracts || 0,
         entryPrice: pos.entryPrice,
         markPrice: pos.markPrice,
-        pnl: pos.unrealized,
+        pnl: pos.unrealizedPnl,
         roe: pos.percentage,
         leverage: pos.leverage,
-        margin: pos.initialMargin || pos.margin,
+        margin: pos.initialMargin,
         liquidationPrice: pos.liquidationPrice,
-        status: pos.side === 'long' && pos.size > 0 ? 'open' : pos.side === 'short' && pos.size > 0 ? 'open' : 'closed',
+        status: (pos.side === 'long' || pos.side === 'short') && (pos.contracts || 0) > 0
+          ? 'open'
+          : 'closed',
         exchangeId: pos.id
       }));
     } catch (error) {
@@ -536,15 +651,15 @@ export class BybitAdapter extends BaseExchange {
     } catch (error) {
       console.error('❌ BybitAdapter: Failed to place order!');
       console.error('📊 Error details:');
-      console.error('  - Error message:', error.message);
-      console.error('  - Error code:', error.code);
-      console.error('  - Error type:', error.constructor.name);
-      if (error.response) {
-        console.error('  - HTTP Status:', error.response.status);
-        console.error('  - HTTP Headers:', JSON.stringify(error.response.headers, null, 2));
-        console.error('  - Response Body:', JSON.stringify(error.response.data, null, 2));
+      console.error('  - Error message:', errorMessage(error));
+      console.error('  - Error type:', error instanceof Error ? error.name : typeof error);
+      if (axios.isAxiosError(error)) {
+        console.error('  - Error code:', error.code);
+        console.error('  - HTTP Status:', error.response?.status);
+        console.error('  - HTTP Headers:', JSON.stringify(error.response?.headers, null, 2));
+        console.error('  - Response Body:', JSON.stringify(error.response?.data, null, 2));
       }
-      if (error.request) {
+      if (axios.isAxiosError(error) && error.request) {
         console.error('  - Request details:', error.request);
       }
       console.error('  - Full error object:', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
@@ -592,6 +707,10 @@ export class BybitAdapter extends BaseExchange {
     }
   }
 
+  async getMyTrades(symbol?: string, limit?: number): Promise<any[]> {
+    return this.getTrades(symbol, limit);
+  }
+
   async getTicker(symbol: string): Promise<any> {
     try {
       console.log('📈 BybitAdapter: Fetching ticker...');
@@ -613,7 +732,7 @@ export class BybitAdapter extends BaseExchange {
       console.log('  - Last:', ticker.last);
       console.log('  - High:', ticker.high);
       console.log('  - Low:', ticker.low);
-      console.log('  - Volume:', ticker.volume);
+      console.log('  - Volume:', ticker.baseVolume);
       console.log('  - Timestamp:', ticker.timestamp);
       console.log('  - Datetime:', ticker.datetime);
       console.log('  - Change:', ticker.change);
@@ -632,7 +751,7 @@ export class BybitAdapter extends BaseExchange {
         last: ticker.last,
         high: ticker.high,
         low: ticker.low,
-        volume: ticker.volume,
+        volume: ticker.baseVolume,
         timestamp: ticker.datetime,
         change: ticker.change,
         percentage: ticker.percentage,
@@ -655,7 +774,7 @@ export class BybitAdapter extends BaseExchange {
         last: ticker.last,
         high: ticker.high,
         low: ticker.low,
-        volume: ticker.volume,
+        volume: ticker.baseVolume,
         timestamp: ticker.datetime,
         change: ticker.change,
         percentage: ticker.percentage,
@@ -701,5 +820,39 @@ export class BybitAdapter extends BaseExchange {
       console.error('Failed to fetch Bybit OHLCV:', error);
       throw error;
     }
+  }
+
+  async subscribeMarketData(
+    _symbols: string[],
+    _options?: SubscriptionOptions
+  ): Promise<void> {
+    throw new Error('Bybit WebSocket market data is not implemented');
+  }
+
+  async unsubscribeMarketData(_symbols: string[]): Promise<void> {
+    throw new Error('Bybit WebSocket market data is not implemented');
+  }
+
+  protected async connectWebSocket(): Promise<void> {
+    throw new Error('Bybit WebSocket market data is not implemented');
+  }
+
+  protected async closeWebSocket(): Promise<void> {
+    throw new Error('Bybit WebSocket market data is not implemented');
+  }
+
+  protected handleWebSocketMessage(_data: unknown): void {
+    throw new Error('Bybit WebSocket market data is not implemented');
+  }
+
+  protected async subscribeToSymbol(
+    _symbol: string,
+    _options?: SubscriptionOptions
+  ): Promise<void> {
+    throw new Error('Bybit WebSocket market data is not implemented');
+  }
+
+  protected async unsubscribeFromSymbol(_symbol: string): Promise<void> {
+    throw new Error('Bybit WebSocket market data is not implemented');
   }
 }

@@ -12,21 +12,21 @@ data routes (19), and real-time trading (15). Backend tests currently pass 20/20
 
 ### Task 1: Repair module boundaries that create cascading failures
 
-- [ ] Fix `BaseAdapter.ts` and `BaseExchange.ts` imports so they resolve their
+- [x] Fix `BaseAdapter.ts` and `BaseExchange.ts` imports so they resolve their
   domain `types.ts` files.
-- [ ] Fix logger imports in the backtest service and controller.
-- [ ] Replace ambiguous data barrel exports with explicit type/class exports.
-- [ ] Run `npm test -- --run` and recount compiler diagnostics.
-- [ ] Commit only this root-cause tranche.
+- [x] Fix logger imports in the backtest service and controller.
+- [x] Replace ambiguous data barrel exports with explicit type/class exports.
+- [x] Run `npm test -- --run` and recount compiler diagnostics.
+- [x] Commit only this root-cause tranche.
 
 ### Task 2: Make the exchange abstraction internally consistent
 
-- [ ] Add compile-focused tests for symbol formatting and adapter construction.
-- [ ] Align `formatSymbol` visibility across `BaseExchange`, Binance, and OKX.
-- [ ] Implement or explicitly mark unsupported abstract Bybit operations without
+- [x] Add compile-focused tests for symbol formatting and adapter construction.
+- [x] Align `formatSymbol` visibility across `BaseExchange`, Binance, and OKX.
+- [x] Implement or explicitly mark unsupported abstract Bybit operations without
   returning fabricated success.
-- [ ] Replace unsafe `unknown` exchange payload access with narrow response types.
-- [ ] Run exchange tests, the backend suite, and recount diagnostics.
+- [x] Replace unsafe `unknown` exchange payload access with narrow response types.
+- [x] Run exchange tests, the backend suite, and recount diagnostics.
 
 ### Task 3: Reconcile Prisma schema and runtime service assumptions
 
