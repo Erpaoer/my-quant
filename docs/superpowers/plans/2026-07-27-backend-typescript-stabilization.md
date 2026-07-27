@@ -51,7 +51,7 @@ data routes (19), and real-time trading (15). Backend tests currently pass 20/20
 ### Task 5: Establish the production compile gate
 
 - [x] Make `npm run build` exit 0 without reducing compiler strictness.
-- [ ] Run backend and frontend unit suites, frontend production build, and browser
+- [x] Run backend and frontend unit suites, frontend production build, and browser
   navigation E2E.
-- [ ] Re-run live read-only Tushare connection/sample/history checks.
-- [ ] Document remaining runtime mocks separately from compiler completion.
+- [x] Re-run live read-only Tushare connection/sample/history checks.
+- [x] Document remaining runtime mocks separately from compiler completion.
