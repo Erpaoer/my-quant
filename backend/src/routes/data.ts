@@ -12,7 +12,8 @@ import {
   getDataManager, 
   YahooFinanceAdapter,
   TushareAdapter,
-  DataSourceConfig 
+  DataSourceConfig,
+  HistoricalDataRequest
 } from '../services/data';
 import config from '../config';
 
@@ -253,7 +254,18 @@ router.get('/historical', optionalAuth, [
     );
 
     // If not enough data in database, generate mock data
-    let historicalData = dbData;
+    let historicalData: Array<{
+      timestamp: Date;
+      open: number;
+      high: number;
+      low: number;
+      close: number;
+      volume: number | null;
+      interval: string;
+      symbol?: string;
+      id?: string;
+      source?: string;
+    }> = dbData;
     if (historicalData.length < (limit as number)) {
       historicalData = generateMockHistoricalData(
         symbol as string,
@@ -264,7 +276,7 @@ router.get('/historical', optionalAuth, [
       );
     }
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Historical data retrieved successfully',
       data: {
@@ -276,7 +288,7 @@ router.get('/historical', optionalAuth, [
     });
   } catch (error) {
     console.error('Error fetching historical data:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to fetch historical data',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -326,7 +338,7 @@ router.get('/indicators', optionalAuth, [
       });
     }
 
-    const indicatorList = indicators.split(',');
+    const indicatorList = String(indicators).split(',');
     const calculatedIndicators = {};
 
     for (const indicator of indicatorList) {
@@ -349,7 +361,7 @@ router.get('/indicators', optionalAuth, [
       }
     }
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Technical indicators calculated successfully',
       data: {
@@ -361,7 +373,7 @@ router.get('/indicators', optionalAuth, [
     });
   } catch (error) {
     console.error('Error calculating indicators:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to calculate indicators',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -471,7 +483,15 @@ async function getHistoricalDataFromDB(symbol: string, interval: string, startTi
 }
 
 function generateMockHistoricalData(symbol: string, interval: string, startTime: Date, endTime: Date, limit: number) {
-  const data = [];
+  const data: Array<{
+    timestamp: Date;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+    interval: string;
+  }> = [];
   const basePrice = getBasePrice(symbol);
   let currentPrice = basePrice;
   
@@ -489,7 +509,7 @@ function generateMockHistoricalData(symbol: string, interval: string, startTime:
       low: currentPrice - Math.random() * basePrice * 0.003,
       close: currentPrice,
       volume: Math.floor(Math.random() * 100000),
-      interval
+      interval: interval as HistoricalDataRequest['interval']
     });
     
     currentTime.setTime(currentTime.getTime() + intervalMs);
@@ -514,7 +534,7 @@ function getIntervalMs(interval: string): number {
 
 // Technical indicator calculations
 function calculateMA(data: any[], period: number) {
-  const result = [];
+  const result: number[] = [];
   for (let i = period - 1; i < data.length; i++) {
     const sum = data.slice(i - period + 1, i + 1).reduce((acc, item) => acc + item.close, 0);
     result.push(sum / period);
@@ -523,7 +543,7 @@ function calculateMA(data: any[], period: number) {
 }
 
 function calculateEMA(data: any[], period: number) {
-  const result = [];
+  const result: number[] = [];
   const multiplier = 2 / (period + 1);
   
   for (let i = 0; i < data.length; i++) {
@@ -537,9 +557,9 @@ function calculateEMA(data: any[], period: number) {
 }
 
 function calculateRSI(data: any[], period: number) {
-  const result = [];
-  const gains = [];
-  const losses = [];
+  const result: number[] = [];
+  const gains: number[] = [];
+  const losses: number[] = [];
   
   for (let i = 1; i < data.length; i++) {
     const change = data[i].close - data[i - 1].close;
@@ -574,7 +594,7 @@ function calculateMACD(data: any[]) {
 
 function calculateBollingerBands(data: any[], period: number) {
   const ma = calculateMA(data, period);
-  const result = [];
+  const result: Array<{ upper: number; middle: number; lower: number }> = [];
   
   for (let i = period - 1; i < data.length; i++) {
     const slice = data.slice(i - period + 1, i + 1);
@@ -626,7 +646,7 @@ router.post('/upload', optionalAuth, upload.single('file'), async (req: AuthRequ
       console.log(`开始处理文件: ${req.file.path}`);
     }
 
-    res.json({
+    return res.json({
       success: true,
       message: '文件上传成功',
       data: {
@@ -638,7 +658,7 @@ router.post('/upload', optionalAuth, upload.single('file'), async (req: AuthRequ
     });
   } catch (error) {
     console.error('文件上传失败:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: '文件上传失败',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -684,7 +704,7 @@ router.get('/imports', optionalAuth, [
       prisma.dataImport.count({ where: whereClause })
     ]);
 
-    res.json({
+    return res.json({
       success: true,
       message: '获取导入历史成功',
       data: {
@@ -699,7 +719,7 @@ router.get('/imports', optionalAuth, [
     });
   } catch (error) {
     console.error('获取导入历史失败:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: '获取导入历史失败',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -731,14 +751,14 @@ router.get('/imports/:id', optionalAuth, async (req: AuthRequest, res) => {
       });
     }
 
-    res.json({
+    return res.json({
       success: true,
       message: '获取导入详情成功',
       data: importRecord
     });
   } catch (error) {
     console.error('获取导入详情失败:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: '获取导入详情失败',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -780,13 +800,13 @@ router.delete('/imports/:id', optionalAuth, async (req: AuthRequest, res) => {
       where: { id: parseInt(id) }
     });
 
-    res.json({
+    return res.json({
       success: true,
       message: '删除导入记录成功'
     });
   } catch (error) {
     console.error('删除导入记录失败:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: '删除导入记录失败',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -881,7 +901,7 @@ router.post('/external/historical', optionalAuth, [
       symbol,
       startTime: new Date(startTime),
       endTime: new Date(endTime),
-      interval
+      interval: interval as HistoricalDataRequest['interval']
     });
 
     res.json({
@@ -912,7 +932,7 @@ router.get('/quality/:symbol', optionalAuth, async (req: AuthRequest, res) => {
     await ensureDataManagerInitialized();
     const manager = getDataManager();
     
-    const qualityReport = manager.getDataQualityReport([symbol]);
+    const qualityReport = await manager.getDataQualityReport([symbol]);
 
     res.json({
       success: true,
@@ -1015,7 +1035,7 @@ router.get('/external/quick/:symbol', optionalAuth, [
       symbol,
       startTime,
       endTime,
-      interval
+      interval: interval as HistoricalDataRequest['interval']
     });
 
     // Calculate basic statistics
@@ -1190,7 +1210,7 @@ router.post('/test-api', optionalAuth, async (req: AuthRequest, res) => {
 // Helper functions to generate sample data
 function generateExchangeSampleData(symbol: string, limit: number) {
   const basePrice = symbol.includes('BTC') ? 45000 : symbol.includes('ETH') ? 3000 : 100;
-  const data = [];
+  const data: Array<Record<string, string | number>> = [];
   
   for (let i = 0; i < limit; i++) {
     const price = basePrice + (Math.random() - 0.5) * basePrice * 0.02;
@@ -1211,7 +1231,7 @@ function generateExchangeSampleData(symbol: string, limit: number) {
 
 function generateYahooSampleData(symbol: string, limit: number) {
   const basePrice = symbol.includes('BTC') ? 45000 : symbol.includes('ETH') ? 3000 : 100;
-  const data = [];
+  const data: Array<Record<string, string | number>> = [];
   
   for (let i = 0; i < limit; i++) {
     const price = basePrice + (Math.random() - 0.5) * basePrice * 0.02;
@@ -1233,7 +1253,7 @@ function generateYahooSampleData(symbol: string, limit: number) {
 
 function generateGenericSampleData(symbol: string, limit: number) {
   const basePrice = 100;
-  const data = [];
+  const data: Array<Record<string, string | number>> = [];
   
   for (let i = 0; i < limit; i++) {
     const price = basePrice + (Math.random() - 0.5) * basePrice * 0.02;
@@ -1269,7 +1289,7 @@ function generateMarketDataSample(symbol: string) {
 }
 
 function generateHistoricalDataSample(symbol: string, interval: string) {
-  const data = [];
+  const data: Array<Record<string, string | number>> = [];
   const basePrice = symbol.includes('BTC') ? 45000 : symbol.includes('ETH') ? 3000 : 100;
   const intervalMs = interval === '1m' ? 60000 : interval === '5m' ? 300000 : interval === '1h' ? 3600000 : 86400000;
   

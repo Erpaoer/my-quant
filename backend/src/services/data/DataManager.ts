@@ -8,7 +8,7 @@ import {
   RealTimeData, 
   HistoricalDataRequest, 
   DataQuery,
-  DataSourceConfig,
+  DataSourceAdapter,
   DataSourceStatus 
 } from './types';
 
@@ -204,7 +204,8 @@ export class DataManager extends EventEmitter {
       symbol: query.symbol,
       startTime: query.startTime || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // 30 days ago
       endTime: query.endTime || new Date(),
-      interval: (query.interval as any) || '1d'
+      interval: (query.interval as HistoricalDataRequest['interval']) || '1d',
+      limit: query.limit
     };
 
     const data = await this.fetchHistoricalData(request);
@@ -235,14 +236,14 @@ export class DataManager extends EventEmitter {
     return Array.from(this.adapters.keys());
   }
 
-  public getDataQualityReport(symbols: string[]): {
+  public async getDataQualityReport(symbols: string[]): Promise<{
     symbol: string;
     totalRecords: number;
     validRecords: number;
     averageQualityScore: number;
     errors: string[];
-  }[] {
-    return symbols.map(symbol => {
+  }[]> {
+    return Promise.all(symbols.map(async symbol => {
       // Get recent data for quality analysis
       const query: DataQuery = {
         symbol,
@@ -250,7 +251,7 @@ export class DataManager extends EventEmitter {
       };
 
       try {
-        const data = this.queryData(query);
+        const data = await this.queryData(query);
         const summary = DataValidator.getDataQualitySummary(data);
         
         return {
@@ -269,7 +270,7 @@ export class DataManager extends EventEmitter {
           errors: ['Failed to query data']
         };
       }
-    });
+    }));
   }
 
   private handleRealTimeData(adapterName: string, data: RealTimeData): void {

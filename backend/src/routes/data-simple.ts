@@ -194,6 +194,7 @@ router.post('/test-connection', async (req, res) => {
         throw new Error(`${source} connection timeout`);
       }
     }
+    return;
   } catch (error) {
     console.log('❌ 连接测试最终错误:');
     console.log(`  Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -210,7 +211,7 @@ router.post('/test-connection', async (req, res) => {
     console.log(`  Body:`, JSON.stringify(errorResponse, null, 2));
     console.log('=== 连接测试完成 ===\n');
     
-    res.status(500).json(errorResponse);
+    return res.status(500).json(errorResponse);
   }
 });
 
@@ -417,6 +418,7 @@ router.post('/sample', async (req, res) => {
       
       res.json(responseData);
     }
+    return;
   } catch (error) {
     console.log('❌ 数据样例获取最终错误:');
     console.log(`  Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -433,7 +435,7 @@ router.post('/sample', async (req, res) => {
     console.log(`  Body:`, JSON.stringify(errorResponse, null, 2));
     console.log('=== 数据样例获取完成 ===\n');
     
-    res.status(500).json(errorResponse);
+    return res.status(500).json(errorResponse);
   }
 });
 
@@ -810,6 +812,7 @@ router.post('/test-api', async (req, res) => {
       
       res.json(responseData);
     }
+    return;
   } catch (error) {
     console.log('❌ API测试最终错误:');
     console.log(`  Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -826,14 +829,14 @@ router.post('/test-api', async (req, res) => {
     console.log(`  Body:`, JSON.stringify(errorResponse, null, 2));
     console.log('=== API测试完成 ===\n');
     
-    res.status(500).json(errorResponse);
+    return res.status(500).json(errorResponse);
   }
 });
 
 // Helper functions to generate sample data
 function generateExchangeSampleData(symbol: string, limit: number) {
   const basePrice = symbol.includes('BTC') ? 45000 : symbol.includes('ETH') ? 3000 : 100;
-  const data = [];
+  const data: Array<Record<string, string | number>> = [];
   
   for (let i = 0; i < limit; i++) {
     const price = basePrice + (Math.random() - 0.5) * basePrice * 0.02;
@@ -854,7 +857,7 @@ function generateExchangeSampleData(symbol: string, limit: number) {
 
 function generateYahooSampleData(symbol: string, limit: number) {
   const basePrice = symbol.includes('BTC') ? 45000 : symbol.includes('ETH') ? 3000 : 100;
-  const data = [];
+  const data: Array<Record<string, string | number>> = [];
   
   for (let i = 0; i < limit; i++) {
     const price = basePrice + (Math.random() - 0.5) * basePrice * 0.02;
@@ -876,7 +879,7 @@ function generateYahooSampleData(symbol: string, limit: number) {
 
 function generateGenericSampleData(symbol: string, limit: number) {
   const basePrice = 100;
-  const data = [];
+  const data: Array<Record<string, string | number>> = [];
   
   for (let i = 0; i < limit; i++) {
     const price = basePrice + (Math.random() - 0.5) * basePrice * 0.02;
@@ -912,7 +915,7 @@ function generateMarketDataSample(symbol: string) {
 }
 
 function generateHistoricalDataSample(symbol: string, interval: string) {
-  const data = [];
+  const data: Array<Record<string, string | number>> = [];
   const basePrice = symbol.includes('BTC') ? 45000 : symbol.includes('ETH') ? 3000 : 100;
   const intervalMs = interval === '1m' ? 60000 : interval === '5m' ? 300000 : interval === '1h' ? 3600000 : 86400000;
   

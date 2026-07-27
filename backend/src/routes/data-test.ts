@@ -124,7 +124,7 @@ router.post('/test-api', async (req, res) => {
 // Helper functions to generate sample data
 function generateExchangeSampleData(symbol: string, limit: number) {
   const basePrice = symbol.includes('BTC') ? 45000 : symbol.includes('ETH') ? 3000 : 100;
-  const data = [];
+  const data: Array<Record<string, string | number>> = [];
   
   for (let i = 0; i < limit; i++) {
     const price = basePrice + (Math.random() - 0.5) * basePrice * 0.02;
@@ -145,7 +145,7 @@ function generateExchangeSampleData(symbol: string, limit: number) {
 
 function generateYahooSampleData(symbol: string, limit: number) {
   const basePrice = symbol.includes('BTC') ? 45000 : symbol.includes('ETH') ? 3000 : 100;
-  const data = [];
+  const data: Array<Record<string, string | number>> = [];
   
   for (let i = 0; i < limit; i++) {
     const price = basePrice + (Math.random() - 0.5) * basePrice * 0.02;
@@ -167,7 +167,7 @@ function generateYahooSampleData(symbol: string, limit: number) {
 
 function generateGenericSampleData(symbol: string, limit: number) {
   const basePrice = 100;
-  const data = [];
+  const data: Array<Record<string, string | number>> = [];
   
   for (let i = 0; i < limit; i++) {
     const price = basePrice + (Math.random() - 0.5) * basePrice * 0.02;
@@ -203,7 +203,7 @@ function generateMarketDataSample(symbol: string) {
 }
 
 function generateHistoricalDataSample(symbol: string, interval: string) {
-  const data = [];
+  const data: Array<Record<string, string | number>> = [];
   const basePrice = symbol.includes('BTC') ? 45000 : symbol.includes('ETH') ? 3000 : 100;
   const intervalMs = interval === '1m' ? 60000 : interval === '5m' ? 300000 : interval === '1h' ? 3600000 : 86400000;
   

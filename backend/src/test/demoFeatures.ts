@@ -72,7 +72,7 @@ async function demonstrateFeatures() {
 
   console.log('🔍 演示4: 数据质量报告');
   try {
-    const qualityReport = manager.getDataQualityReport(['AAPL']);
+    const qualityReport = await manager.getDataQualityReport(['AAPL']);
     console.log('数据质量报告:', JSON.stringify(qualityReport[0], null, 2));
   } catch (error) {
     console.log('获取数据质量报告失败:', error instanceof Error ? error.message : String(error));

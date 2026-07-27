@@ -21,6 +21,7 @@ export interface HistoricalDataRequest {
   startTime: Date;
   endTime: Date;
   interval: '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d' | '1w' | '1M';
+  limit?: number;
 }
 
 export interface DataSourceConfig {
@@ -34,8 +35,7 @@ export interface DataSourceConfig {
 }
 
 export interface DataSourceAdapter {
-  name: string;
-  config: DataSourceConfig;
+  getName(): string;
   connect(): Promise<boolean>;
   disconnect(): Promise<boolean>;
   fetchHistoricalData(request: HistoricalDataRequest): Promise<MarketData[]>;

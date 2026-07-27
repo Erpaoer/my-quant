@@ -63,7 +63,7 @@ async function testDataSources() {
 
     // Test 4: Data quality report
     console.log('🔍 Testing data quality report...');
-    const qualityReport = manager.getDataQualityReport(['AAPL']);
+    const qualityReport = await manager.getDataQualityReport(['AAPL']);
     console.log('Quality report:', qualityReport[0]);
     console.log('✅ Data quality test passed\n');
 
