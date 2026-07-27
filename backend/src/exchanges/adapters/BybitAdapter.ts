@@ -5,7 +5,7 @@ import axios from 'axios';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 
 export class BybitAdapter extends BaseExchange {
-  private exchange: ccxt.bybit;
+  private exchange: InstanceType<typeof ccxt.bybit>;
 
   constructor(config: ExchangeConfig) {
     super(config);

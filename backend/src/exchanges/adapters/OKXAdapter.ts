@@ -749,7 +749,7 @@ export class OKXAdapter extends BaseExchange {
     };
   }
 
-  private formatSymbol(symbol: string): string {
+  protected formatSymbol(symbol: string): string {
     // OKX使用不同的符号格式
     return symbol.replace('/', '-').toUpperCase();
   }

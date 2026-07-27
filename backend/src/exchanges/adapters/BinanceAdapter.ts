@@ -581,7 +581,7 @@ export class BinanceAdapter extends BaseExchange {
     };
   }
 
-  private formatSymbol(symbol: string): string {
+  protected formatSymbol(symbol: string): string {
     // Binance使用不同的符号格式
     return symbol.replace('/', '').toUpperCase();
   }
