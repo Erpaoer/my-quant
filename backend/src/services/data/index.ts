@@ -1,4 +1,16 @@
-export * from './types';
+export type {
+  MarketData,
+  RealTimeData,
+  HistoricalDataRequest,
+  DataSourceConfig,
+  DataSourceAdapter,
+  DataSourceStatus,
+  DataProcessor as DataProcessorContract,
+  DataValidator as DataValidatorContract,
+  ValidationResult,
+  CacheConfig,
+  DataQuery
+} from './types';
 export * from './DataManager';
 export * from './adapters/BaseAdapter';
 export * from './adapters/YahooFinanceAdapter';

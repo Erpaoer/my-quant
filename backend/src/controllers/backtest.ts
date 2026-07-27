@@ -3,7 +3,7 @@ import { body, query, validationResult } from 'express-validator'
 import { asyncHandler, createError } from '../middleware/errorHandler'
 import { authenticate, AuthRequest } from '../middleware/auth'
 import BacktestService, { BacktestRequest } from '../services/backtest/BacktestService'
-import { logger } from '../utils/logger'
+import logger from '../utils/logger'
 
 const backtestService = new BacktestService()
 

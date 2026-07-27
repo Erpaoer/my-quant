@@ -1,6 +1,6 @@
 import { PrismaClient, Strategy, Backtest, MarketData, Trade } from '@prisma/client'
 import BacktestEngine, { BacktestConfig, BacktestResult } from './BacktestEngine'
-import { logger } from '../utils/logger'
+import logger from '../../utils/logger'
 
 const prisma = new PrismaClient()
 

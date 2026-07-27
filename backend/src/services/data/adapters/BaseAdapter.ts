@@ -6,7 +6,7 @@ import {
   HistoricalDataRequest, 
   MarketData, 
   RealTimeData 
-} from './types';
+} from '../types';
 
 export abstract class BaseDataSourceAdapter extends EventEmitter implements DataSourceAdapter {
   protected config: DataSourceConfig;

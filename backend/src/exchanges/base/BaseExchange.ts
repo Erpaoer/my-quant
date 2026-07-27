@@ -19,7 +19,7 @@ import {
   ExchangeEventType,
   ExchangeCallback,
   SubscriptionOptions
-} from './types';
+} from '../types';
 
 export abstract class BaseExchange extends EventEmitter {
   protected config: ExchangeConfig;
