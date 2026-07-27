@@ -349,13 +349,13 @@ router.post('/alerts/:id/resolve', authenticate, async (req: AuthRequest, res) =
       }
     });
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Alert resolved successfully'
     });
   } catch (error) {
     console.error('Error resolving alert:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to resolve alert',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -664,7 +664,13 @@ function getNetworkUsage() {
 
 async function getHistoricalMetrics(period: string) {
   const points = period === '24h' ? 24 : 7;
-  const data = [];
+  const data: Array<{
+    timestamp: Date;
+    cpu: number;
+    memory: number;
+    disk: number;
+    network: number;
+  }> = [];
   
   for (let i = points - 1; i >= 0; i--) {
     const timestamp = new Date(Date.now() - i * 60 * 60 * 1000);

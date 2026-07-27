@@ -315,13 +315,13 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res) => {
       where: { id }
     });
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Account deleted successfully'
     });
   } catch (error) {
     console.error('Error deleting account:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to delete account',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -370,19 +370,19 @@ router.post('/:id/connect', authenticate, async (req: AuthRequest, res) => {
         }
       });
 
-      res.json({
+      return res.json({
         success: true,
         message: 'Account connected successfully'
       });
     } else {
-      res.status(400).json({
+      return res.status(400).json({
         success: false,
         message: 'Failed to connect account'
       });
     }
   } catch (error) {
     console.error('Error connecting account:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to connect account',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -418,13 +418,13 @@ router.post('/:id/disconnect', authenticate, async (req: AuthRequest, res) => {
       }
     });
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Account disconnected successfully'
     });
   } catch (error) {
     console.error('Error disconnecting account:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to disconnect account',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -434,9 +434,8 @@ router.post('/:id/disconnect', authenticate, async (req: AuthRequest, res) => {
 
 // 同步账户数据
 router.post('/:id/sync', authenticate, async (req: AuthRequest, res) => {
+  const { id } = req.params;
   try {
-    const { id } = req.params;
-
     // 检查账户所有权
     const account = await prisma.account.findFirst({
       where: { id, userId: req.user!.id }
@@ -470,7 +469,7 @@ router.post('/:id/sync', authenticate, async (req: AuthRequest, res) => {
         }
       });
 
-      res.json({
+      return res.json({
         success: true,
         message: 'Account data synced successfully',
         data: syncResult
@@ -485,7 +484,7 @@ router.post('/:id/sync', authenticate, async (req: AuthRequest, res) => {
         }
       });
 
-      res.status(400).json({
+      return res.status(400).json({
         success: false,
         message: 'Failed to sync account data',
         error: syncResult.error
@@ -506,7 +505,7 @@ router.post('/:id/sync', authenticate, async (req: AuthRequest, res) => {
       }
     });
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to sync account data',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -546,7 +545,7 @@ router.get('/:id/balance', authenticate, async (req: AuthRequest, res) => {
 
     // 获取余额数据
     console.log('🔄 Fetching balance from exchange:', account.accountId);
-    const balances = await exchangeService.getBalance(account.accountId);
+    const balances = await exchangeService.getBalance(account.exchange);
     console.log('📊 Balance response from exchange:', balances);
 
     // 更新数据库中的余额数据
@@ -574,14 +573,14 @@ router.get('/:id/balance', authenticate, async (req: AuthRequest, res) => {
       data: balances
     });
     
-    res.json({
+    return res.json({
       success: true,
       message: 'Balance retrieved successfully',
       data: balances
     });
   } catch (error) {
     console.error('Error fetching balance:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to fetch balance',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -607,7 +606,7 @@ router.get('/:id/positions', authenticate, async (req: AuthRequest, res) => {
     }
 
     // 获取持仓数据
-    const positions = await exchangeService.getPositions(account.accountId);
+    const positions = await exchangeService.getPositions(account.exchange);
 
     // 更新数据库中的持仓数据
     await prisma.position.deleteMany({
@@ -634,14 +633,14 @@ router.get('/:id/positions', authenticate, async (req: AuthRequest, res) => {
       });
     }
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Positions retrieved successfully',
       data: positions
     });
   } catch (error) {
     console.error('Error fetching positions:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to fetch positions',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -813,19 +812,19 @@ router.delete('/:id/orders/:orderId', authenticate, async (req: AuthRequest, res
         }
       });
 
-      res.json({
+      return res.json({
         success: true,
         message: 'Order cancelled successfully'
       });
     } else {
-      res.status(400).json({
+      return res.status(400).json({
         success: false,
         message: 'Failed to cancel order'
       });
     }
   } catch (error) {
     console.error('Error cancelling order:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to cancel order',
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -853,14 +852,14 @@ router.get('/:id/market/:symbol/ticker', authenticate, async (req: AuthRequest, 
     // 获取行情数据
     const ticker = await exchangeService.getTicker(account.exchange, symbol);
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Ticker retrieved successfully',
       data: ticker
     });
   } catch (error) {
     console.error('Error fetching ticker:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to fetch ticker',
       error: error instanceof Error ? error.message : 'Unknown error'

@@ -3,6 +3,7 @@ import { body, query, validationResult } from 'express-validator';
 import prisma from '../config/database';
 import { asyncHandler, createError } from '../middleware/errorHandler';
 import { authenticate, authorize, AuthRequest } from '../middleware/auth';
+import { jsonObject } from '../utils/json';
 
 const router = Router();
 
@@ -695,7 +696,7 @@ router.post('/:id/duplicate', [
       description: originalStrategy.description,
       code: originalStrategy.code,
       type: originalStrategy.type,
-      parameters: originalStrategy.parameters,
+      parameters: jsonObject(originalStrategy.parameters),
       status: 'draft',
       userId: req.user!.id
     }
