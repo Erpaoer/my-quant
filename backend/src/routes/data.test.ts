@@ -133,6 +133,7 @@ describe("primary market data routes", () => {
     vi.clearAllMocks();
     mocks.findMany.mockReset();
     mocks.fetchRealTimeData.mockReset();
+    mocks.fetchHistoricalData.mockReset();
     mocks.initialize.mockReset();
     mocks.registerAdapter.mockReset();
     mocks.prismaClient.mockReset();
@@ -152,6 +153,7 @@ describe("primary market data routes", () => {
     mocks.getDataManager.mockImplementation(() => mocks.manager);
     mocks.findMany.mockResolvedValue([]);
     mocks.fetchRealTimeData.mockResolvedValue([]);
+    mocks.fetchHistoricalData.mockResolvedValue([]);
     mocks.initialize.mockResolvedValue(undefined);
     vi.spyOn(console, "error").mockImplementation(() => undefined);
 
@@ -178,6 +180,18 @@ describe("primary market data routes", () => {
 
   async function get(path: string) {
     const response = await fetch(`${baseUrl}${path}`);
+    const body = (await response.json()) as JsonBody;
+    return { response, body };
+  }
+
+  async function post(path: string, json: JsonBody) {
+    const response = await fetch(`${baseUrl}${path}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(json),
+    });
     const body = (await response.json()) as JsonBody;
     return { response, body };
   }
@@ -571,4 +585,319 @@ describe("primary market data routes", () => {
       "postgres password and private host",
     );
   });
+
+  it("returns external real-time rows from all configured adapters when source is omitted", async () => {
+    mocks.fetchRealTimeData.mockResolvedValue([
+      marketRow("BTCUSDT", { source: "Yahoo Finance" }),
+      marketRow("ETHUSDT", { source: "Another Configured Adapter" }),
+    ]);
+
+    const { response, body } = await get(
+      "/data/external/realtime?symbols=BTCUSDT,ETHUSDT",
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.fetchRealTimeData).toHaveBeenCalledWith([
+      "BTCUSDT",
+      "ETHUSDT",
+    ]);
+    expect(body).toMatchObject({
+      success: true,
+      count: 2,
+      data: [
+        {
+          symbol: "BTCUSDT",
+          source: "Yahoo Finance",
+          close: 105,
+        },
+        {
+          symbol: "ETHUSDT",
+          source: "Another Configured Adapter",
+          close: 105,
+        },
+      ],
+    });
+  });
+
+  it("returns NO_DATA for an empty external real-time response", async () => {
+    const { response, body } = await get(
+      "/data/external/realtime?symbols=BTCUSDT",
+    );
+
+    expect(response.status).toBe(502);
+    expect(body).toMatchObject({
+      success: false,
+      code: "NO_DATA",
+      source: "configured-adapters",
+      retryable: true,
+    });
+    expect(body).not.toHaveProperty("data");
+  });
+
+  it("returns NO_DATA when every external real-time row is unusable", async () => {
+    mocks.fetchRealTimeData.mockResolvedValue([
+      marketRow("BTCUSDT", { close: Number.NaN }),
+      marketRow("ETHUSDT", { source: " " }),
+    ]);
+
+    const { response, body } = await get(
+      "/data/external/realtime?symbols=BTCUSDT,ETHUSDT",
+    );
+
+    expect(response.status).toBe(502);
+    expect(body).toMatchObject({
+      success: false,
+      code: "NO_DATA",
+      source: "configured-adapters",
+      retryable: true,
+    });
+    expect(body).not.toHaveProperty("data");
+  });
+
+  it("filters external real-time rows to Yahoo Finance when source=yahoo", async () => {
+    mocks.fetchRealTimeData.mockResolvedValue([
+      marketRow("BTCUSDT", { source: "Yahoo Finance" }),
+      marketRow("ETHUSDT", { source: "Another Configured Adapter" }),
+    ]);
+
+    const { response, body } = await get(
+      "/data/external/realtime?symbols=BTCUSDT,ETHUSDT&source=yahoo",
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.fetchRealTimeData).toHaveBeenCalledWith([
+      "BTCUSDT",
+      "ETHUSDT",
+    ]);
+    expect(body.data).toEqual([
+      expect.objectContaining({
+        symbol: "BTCUSDT",
+        source: "Yahoo Finance",
+      }),
+    ]);
+    expect(body.count).toBe(1);
+  });
+
+  it.each(["binance", "alpha_vantage"])(
+    "rejects unimplemented external real-time source %s before calling the manager",
+    async (source) => {
+      const { response, body } = await get(
+        `/data/external/realtime?symbols=BTCUSDT&source=${source}`,
+      );
+
+      expect(response.status).toBe(501);
+      expect(body).toMatchObject({
+        success: false,
+        code: "SOURCE_NOT_IMPLEMENTED",
+        source,
+        retryable: false,
+      });
+      expect(body).not.toHaveProperty("data");
+      expect(mocks.initDataManager).not.toHaveBeenCalled();
+      expect(mocks.getDataManager).not.toHaveBeenCalled();
+      expect(mocks.fetchRealTimeData).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps external real-time manager failures on the safe upstream contract", async () => {
+    mocks.fetchRealTimeData.mockRejectedValue(
+      new Error("private real-time provider details"),
+    );
+
+    const { response, body } = await get(
+      "/data/external/realtime?symbols=BTCUSDT",
+    );
+
+    expect(response.status).toBe(502);
+    expect(body).toMatchObject({
+      success: false,
+      code: "SOURCE_UNREACHABLE",
+      source: "configured-adapters",
+      retryable: true,
+    });
+    expect(body).not.toHaveProperty("data");
+    expect(JSON.stringify(body)).not.toContain(
+      "private real-time provider details",
+    );
+  });
+
+  it("preserves a non-empty external historical response", async () => {
+    const row = marketRow("BTCUSDT", { source: "Yahoo Finance" });
+    mocks.fetchHistoricalData.mockResolvedValue([row]);
+
+    const { response, body } = await post("/data/external/historical", {
+      symbol: "BTCUSDT",
+      startTime: "2026-07-01T00:00:00.000Z",
+      endTime: "2026-07-28T00:00:00.000Z",
+      interval: "1d",
+    });
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      success: true,
+      data: {
+        symbol: "BTCUSDT",
+        interval: "1d",
+        count: 1,
+        data: [
+          {
+            symbol: "BTCUSDT",
+            timestamp: "2026-07-28T02:03:04.000Z",
+            close: 105,
+            source: "Yahoo Finance",
+          },
+        ],
+      },
+    });
+  });
+
+  it("returns NO_DATA for an empty external historical response", async () => {
+    const { response, body } = await post("/data/external/historical", {
+      symbol: "BTCUSDT",
+      startTime: "2026-07-01T00:00:00.000Z",
+      endTime: "2026-07-28T00:00:00.000Z",
+      interval: "1d",
+    });
+
+    expect(response.status).toBe(502);
+    expect(body).toMatchObject({
+      success: false,
+      code: "NO_DATA",
+      source: "configured-adapters",
+      retryable: true,
+    });
+    expect(body).not.toHaveProperty("data");
+  });
+
+  it("keeps external historical manager failures on the safe upstream contract", async () => {
+    mocks.fetchHistoricalData.mockRejectedValue(
+      new Error("private historical provider details"),
+    );
+
+    const { response, body } = await post("/data/external/historical", {
+      symbol: "BTCUSDT",
+      startTime: "2026-07-01T00:00:00.000Z",
+      endTime: "2026-07-28T00:00:00.000Z",
+      interval: "1d",
+    });
+
+    expect(response.status).toBe(502);
+    expect(body).toMatchObject({
+      success: false,
+      code: "SOURCE_UNREACHABLE",
+      source: "configured-adapters",
+      retryable: true,
+    });
+    expect(body).not.toHaveProperty("data");
+    expect(JSON.stringify(body)).not.toContain(
+      "private historical provider details",
+    );
+  });
+
+  it("preserves the non-empty external quick summary", async () => {
+    mocks.fetchHistoricalData.mockResolvedValue([
+      marketRow("BTCUSDT", { close: 100 }),
+      marketRow("BTCUSDT", { close: 110 }),
+    ]);
+
+    const { response, body } = await get(
+      "/data/external/quick/BTCUSDT?days=7&interval=1d",
+    );
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      success: true,
+      data: {
+        symbol: "BTCUSDT",
+        interval: "1d",
+        days: 7,
+        summary: {
+          currentPrice: 110,
+          change: 10,
+          changePercent: 10,
+          minPrice: 100,
+          maxPrice: 110,
+          dataPoints: 2,
+        },
+      },
+    });
+    expect(body.data.historicalData).toHaveLength(2);
+  });
+
+  it("returns NO_DATA for an empty external quick response", async () => {
+    const { response, body } = await get(
+      "/data/external/quick/BTCUSDT?days=7&interval=1d",
+    );
+
+    expect(response.status).toBe(502);
+    expect(body).toMatchObject({
+      success: false,
+      code: "NO_DATA",
+      source: "configured-adapters",
+      retryable: true,
+    });
+    expect(body).not.toHaveProperty("data");
+  });
+
+  it("keeps external quick manager failures on the safe upstream contract", async () => {
+    mocks.fetchHistoricalData.mockRejectedValue(
+      new Error("private quick provider details"),
+    );
+
+    const { response, body } = await get(
+      "/data/external/quick/BTCUSDT?days=7&interval=1d",
+    );
+
+    expect(response.status).toBe(502);
+    expect(body).toMatchObject({
+      success: false,
+      code: "SOURCE_UNREACHABLE",
+      source: "configured-adapters",
+      retryable: true,
+    });
+    expect(body).not.toHaveProperty("data");
+    expect(JSON.stringify(body)).not.toContain(
+      "private quick provider details",
+    );
+  });
+
+  it.each([
+    [
+      "/data/test-connection",
+      { source: "yahoo", type: "rest" },
+      "/data-test/test-connection",
+    ],
+    [
+      "/data/sample",
+      { source: "yahoo", symbol: "BTCUSDT", limit: 2 },
+      "/data-test/sample",
+    ],
+    [
+      "/data/test-api",
+      {
+        source: "yahoo",
+        apiType: "market",
+        symbol: "BTCUSDT",
+        interval: "1d",
+      },
+      "/data-test/test-api",
+    ],
+  ])(
+    "deprecates legacy endpoint %s without generating market data",
+    async (path, json, successor) => {
+      const random = vi.spyOn(Math, "random");
+
+      const { response, body } = await post(path, json);
+
+      expect(response.status).toBe(410);
+      expect(body).toMatchObject({
+        success: false,
+        code: "LEGACY_ENDPOINT_DEPRECATED",
+        successor,
+        retryable: false,
+      });
+      expect(body).not.toHaveProperty("data");
+      expect(random).not.toHaveBeenCalled();
+    },
+  );
 });

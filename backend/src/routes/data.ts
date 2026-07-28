@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type Response } from 'express';
 import { authenticate, optionalAuth, AuthRequest } from '../middleware/auth';
 import { PrismaClient } from '@prisma/client';
 import { query, body, validationResult } from 'express-validator';
@@ -151,6 +151,19 @@ function isUsableRealTimeRow(row: unknown): row is UsableRealTimeRow {
     volume >= 0 &&
     high >= Math.max(open, close) &&
     low <= Math.min(open, close)
+  );
+}
+
+function sendLegacyDataTestEndpoint(res: Response, successor: string) {
+  return sendOperationalDataError(
+    res,
+    410,
+    'LEGACY_ENDPOINT_DEPRECATED',
+    'This legacy data test endpoint has been deprecated',
+    {
+      successor,
+      retryable: false
+    }
   );
 }
 
@@ -594,21 +607,6 @@ router.get('/overview', optionalAuth, async (req: AuthRequest, res) => {
 });
 
 // Helper functions
-function getBasePrice(symbol: string): number {
-  const prices: any = {
-    'BTCUSDT': 45000,
-    'ETHUSDT': 3200,
-    'BNBUSDT': 320,
-    'ADAUSDT': 0.6,
-    'SOLUSDT': 100,
-    'DOTUSDT': 7.5,
-    '000001.SH': 3200,
-    '399001.SZ': 10000,
-    '399006.SZ': 2000
-  };
-  return prices[symbol] || 100;
-}
-
 async function getHistoricalDataFromDB(symbol: string, interval: string, startTime?: Date, endTime?: Date, limit?: number) {
   const whereClause: any = {
     symbol,
@@ -629,56 +627,6 @@ async function getHistoricalDataFromDB(symbol: string, interval: string, startTi
     },
     take: limit || 100
   });
-}
-
-function generateMockHistoricalData(symbol: string, interval: string, startTime: Date, endTime: Date, limit: number) {
-  const data: Array<{
-    timestamp: Date;
-    open: number;
-    high: number;
-    low: number;
-    close: number;
-    volume: number;
-    interval: string;
-  }> = [];
-  const basePrice = getBasePrice(symbol);
-  let currentPrice = basePrice;
-  
-  const intervalMs = getIntervalMs(interval);
-  const currentTime = new Date(startTime);
-  
-  for (let i = 0; i < limit && currentTime <= endTime; i++) {
-    const change = (Math.random() - 0.5) * basePrice * 0.005;
-    currentPrice = Math.max(currentPrice + change, basePrice * 0.5);
-    
-    data.push({
-      timestamp: new Date(currentTime),
-      open: currentPrice,
-      high: currentPrice + Math.random() * basePrice * 0.003,
-      low: currentPrice - Math.random() * basePrice * 0.003,
-      close: currentPrice,
-      volume: Math.floor(Math.random() * 100000),
-      interval: interval as HistoricalDataRequest['interval']
-    });
-    
-    currentTime.setTime(currentTime.getTime() + intervalMs);
-  }
-  
-  return data.reverse();
-}
-
-function getIntervalMs(interval: string): number {
-  const intervals: any = {
-    '1m': 60 * 1000,
-    '5m': 5 * 60 * 1000,
-    '15m': 15 * 60 * 1000,
-    '30m': 30 * 60 * 1000,
-    '1h': 60 * 60 * 1000,
-    '4h': 4 * 60 * 60 * 1000,
-    '1d': 24 * 60 * 60 * 1000,
-    '1w': 7 * 24 * 60 * 60 * 1000
-  };
-  return intervals[interval] || 60 * 60 * 1000;
 }
 
 // Technical indicator calculations
@@ -1002,13 +950,44 @@ router.get('/external/realtime', optionalAuth, [
       });
     }
 
+    const source = req.query.source as string | undefined;
+    if (source && source !== 'yahoo') {
+      return sendOperationalDataError(
+        res,
+        501,
+        'SOURCE_NOT_IMPLEMENTED',
+        'The requested real-time data source is not implemented',
+        {
+          source,
+          retryable: false
+        }
+      );
+    }
+
     await ensureDataManagerInitialized();
     const manager = getDataManager();
     
     const symbols = (req.query.symbols as string).split(',');
-    const realTimeData = await manager.fetchRealTimeData(symbols);
+    const realTimeData = (await manager.fetchRealTimeData(symbols))
+      .filter(row =>
+        isUsableRealTimeRow(row) &&
+        (source !== 'yahoo' || row.source === 'Yahoo Finance')
+      );
 
-    res.json({
+    if (realTimeData.length === 0) {
+      return sendOperationalDataError(
+        res,
+        502,
+        'NO_DATA',
+        'No real-time data available from configured adapters',
+        {
+          source: 'configured-adapters',
+          retryable: true
+        }
+      );
+    }
+
+    return res.json({
       success: true,
       message: 'Real-time data retrieved successfully',
       data: realTimeData,
@@ -1016,11 +995,12 @@ router.get('/external/realtime', optionalAuth, [
     });
   } catch (error) {
     console.error('Error fetching real-time data:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch real-time data',
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
+    return sendUpstreamDataError(
+      res,
+      'configured-adapters',
+      error,
+      'Failed to fetch real-time data'
+    );
   }
 });
 
@@ -1053,7 +1033,20 @@ router.post('/external/historical', optionalAuth, [
       interval: interval as HistoricalDataRequest['interval']
     });
 
-    res.json({
+    if (historicalData.length === 0) {
+      return sendOperationalDataError(
+        res,
+        502,
+        'NO_DATA',
+        'No historical data available from configured adapters',
+        {
+          source: 'configured-adapters',
+          retryable: true
+        }
+      );
+    }
+
+    return res.json({
       success: true,
       message: 'Historical data retrieved successfully',
       data: {
@@ -1065,11 +1058,12 @@ router.post('/external/historical', optionalAuth, [
     });
   } catch (error) {
     console.error('Error fetching historical data:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch historical data',
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
+    return sendUpstreamDataError(
+      res,
+      'configured-adapters',
+      error,
+      'Failed to fetch historical data'
+    );
   }
 });
 
@@ -1197,7 +1191,7 @@ router.get('/external/quick/:symbol', optionalAuth, [
       const change = lastPrice - firstPrice;
       const changePercent = (change / firstPrice) * 100;
 
-      res.json({
+      return res.json({
         success: true,
         message: 'Quick data fetch completed successfully',
         data: {
@@ -1216,265 +1210,41 @@ router.get('/external/quick/:symbol', optionalAuth, [
         }
       });
     } else {
-      res.json({
-        success: true,
-        message: 'No data available for the specified parameters',
-        data: {
-          symbol,
-          interval,
-          days,
-          summary: null,
-          historicalData: []
+      return sendOperationalDataError(
+        res,
+        502,
+        'NO_DATA',
+        'No quick historical data available from configured adapters',
+        {
+          source: 'configured-adapters',
+          retryable: true
         }
-      });
+      );
     }
   } catch (error) {
     console.error('Error in quick data fetch:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch quick data',
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
+    return sendUpstreamDataError(
+      res,
+      'configured-adapters',
+      error,
+      'Failed to fetch quick data'
+    );
   }
 });
 
 // Test data source connection
-router.post('/test-connection', optionalAuth, async (req: AuthRequest, res) => {
-  try {
-    const { source, type } = req.body;
-    
-    console.log(`Testing connection to ${source} (${type})`);
-    
-    // Simulate connection test
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // Mock successful connection for demo
-    const isConnected = Math.random() > 0.2; // 80% success rate
-    const latency = Math.floor(Math.random() * 500) + 50; // 50-550ms
-    
-    if (isConnected) {
-      res.json({
-        success: true,
-        message: 'Connection test successful',
-        data: {
-          source,
-          type,
-          connected: true,
-          latency,
-          timestamp: new Date().toISOString()
-        }
-      });
-    } else {
-      throw new Error('Connection timeout');
-    }
-  } catch (error) {
-    console.error('Connection test failed:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Connection test failed',
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
-});
+router.post('/test-connection', optionalAuth, (_req, res) =>
+  sendLegacyDataTestEndpoint(res, '/data-test/test-connection')
+);
 
 // Get sample data from data source
-router.post('/sample', optionalAuth, async (req: AuthRequest, res) => {
-  try {
-    const { source, symbol, limit = 5 } = req.body;
-    
-    console.log(`Getting sample data from ${source} for ${symbol}`);
-    
-    // Generate sample data based on source type
-    let sampleData;
-    
-    switch (source) {
-      case 'binance':
-      case 'okx':
-      case 'huobi':
-        sampleData = generateExchangeSampleData(symbol, limit);
-        break;
-      case 'yahoo':
-        sampleData = generateYahooSampleData(symbol, limit);
-        break;
-      default:
-        sampleData = generateGenericSampleData(symbol, limit);
-    }
-    
-    res.json({
-      success: true,
-      message: 'Sample data retrieved successfully',
-      data: sampleData
-    });
-  } catch (error) {
-    console.error('Failed to get sample data:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to get sample data',
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
-});
+router.post('/sample', optionalAuth, (_req, res) =>
+  sendLegacyDataTestEndpoint(res, '/data-test/sample')
+);
 
 // Test API data source
-router.post('/test-api', optionalAuth, async (req: AuthRequest, res) => {
-  try {
-    const { source, apiType, symbol, interval } = req.body;
-    
-    console.log(`Testing API ${source} ${apiType} for ${symbol}`);
-    
-    // Simulate API test
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    let testData;
-    
-    switch (apiType) {
-      case 'market':
-        testData = generateMarketDataSample(symbol);
-        break;
-      case 'historical':
-        testData = generateHistoricalDataSample(symbol, interval);
-        break;
-      case 'realtime':
-        testData = generateRealtimeDataSample(symbol);
-        break;
-      default:
-        testData = generateGenericSampleData(symbol, 1);
-    }
-    
-    res.json({
-      success: true,
-      message: 'API test successful',
-      data: testData
-    });
-  } catch (error) {
-    console.error('API test failed:', error);
-    res.status(500).json({
-      success: false,
-      message: 'API test failed',
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
-});
-
-// Helper functions to generate sample data
-function generateExchangeSampleData(symbol: string, limit: number) {
-  const basePrice = symbol.includes('BTC') ? 45000 : symbol.includes('ETH') ? 3000 : 100;
-  const data: Array<Record<string, string | number>> = [];
-  
-  for (let i = 0; i < limit; i++) {
-    const price = basePrice + (Math.random() - 0.5) * basePrice * 0.02;
-    data.push({
-      symbol,
-      timestamp: new Date(Date.now() - i * 60000).toISOString(),
-      open: price * (1 - Math.random() * 0.01),
-      high: price * (1 + Math.random() * 0.015),
-      low: price * (1 - Math.random() * 0.015),
-      close: price,
-      volume: Math.floor(Math.random() * 1000000),
-      source: 'exchange'
-    });
-  }
-  
-  return data;
-}
-
-function generateYahooSampleData(symbol: string, limit: number) {
-  const basePrice = symbol.includes('BTC') ? 45000 : symbol.includes('ETH') ? 3000 : 100;
-  const data: Array<Record<string, string | number>> = [];
-  
-  for (let i = 0; i < limit; i++) {
-    const price = basePrice + (Math.random() - 0.5) * basePrice * 0.02;
-    data.push({
-      symbol,
-      timestamp: new Date(Date.now() - i * 60000).toISOString(),
-      open: price * (1 - Math.random() * 0.01),
-      high: price * (1 + Math.random() * 0.015),
-      low: price * (1 - Math.random() * 0.015),
-      close: price,
-      volume: Math.floor(Math.random() * 1000000),
-      source: 'yahoo',
-      qualityScore: 0.95
-    });
-  }
-  
-  return data;
-}
-
-function generateGenericSampleData(symbol: string, limit: number) {
-  const basePrice = 100;
-  const data: Array<Record<string, string | number>> = [];
-  
-  for (let i = 0; i < limit; i++) {
-    const price = basePrice + (Math.random() - 0.5) * basePrice * 0.02;
-    data.push({
-      symbol,
-      timestamp: new Date(Date.now() - i * 60000).toISOString(),
-      open: price * (1 - Math.random() * 0.01),
-      high: price * (1 + Math.random() * 0.015),
-      low: price * (1 - Math.random() * 0.015),
-      close: price,
-      volume: Math.floor(Math.random() * 1000000),
-      source: 'generic'
-    });
-  }
-  
-  return data;
-}
-
-function generateMarketDataSample(symbol: string) {
-  const basePrice = symbol.includes('BTC') ? 45000 : symbol.includes('ETH') ? 3000 : 100;
-  const price = basePrice + (Math.random() - 0.5) * basePrice * 0.02;
-  
-  return {
-    symbol,
-    price: parseFloat(price.toFixed(2)),
-    change24h: parseFloat(((Math.random() - 0.5) * 10).toFixed(2)),
-    volume24h: Math.floor(Math.random() * 1000000000),
-    high24h: parseFloat((price * 1.02).toFixed(2)),
-    low24h: parseFloat((price * 0.98).toFixed(2)),
-    timestamp: new Date().toISOString(),
-    source: 'market-api'
-  };
-}
-
-function generateHistoricalDataSample(symbol: string, interval: string) {
-  const data: Array<Record<string, string | number>> = [];
-  const basePrice = symbol.includes('BTC') ? 45000 : symbol.includes('ETH') ? 3000 : 100;
-  const intervalMs = interval === '1m' ? 60000 : interval === '5m' ? 300000 : interval === '1h' ? 3600000 : 86400000;
-  
-  for (let i = 0; i < 10; i++) {
-    const price = basePrice + (Math.random() - 0.5) * basePrice * 0.02;
-    data.push({
-      timestamp: new Date(Date.now() - i * intervalMs).toISOString(),
-      open: parseFloat((price * (1 - Math.random() * 0.01)).toFixed(2)),
-      high: parseFloat((price * (1 + Math.random() * 0.015)).toFixed(2)),
-      low: parseFloat((price * (1 - Math.random() * 0.015)).toFixed(2)),
-      close: parseFloat(price.toFixed(2)),
-      volume: Math.floor(Math.random() * 1000000)
-    });
-  }
-  
-  return {
-    symbol,
-    interval,
-    data,
-    count: data.length
-  };
-}
-
-function generateRealtimeDataSample(symbol: string) {
-  const basePrice = symbol.includes('BTC') ? 45000 : symbol.includes('ETH') ? 3000 : 100;
-  const price = basePrice + (Math.random() - 0.5) * basePrice * 0.001;
-  
-  return {
-    symbol,
-    price: parseFloat(price.toFixed(2)),
-    bid: parseFloat((price - 0.5).toFixed(2)),
-    ask: parseFloat((price + 0.5).toFixed(2)),
-    lastSize: Math.floor(Math.random() * 1000),
-    timestamp: new Date().toISOString(),
-    source: 'realtime-api'
-  };
-}
+router.post('/test-api', optionalAuth, (_req, res) =>
+  sendLegacyDataTestEndpoint(res, '/data-test/test-api')
+);
 
 export default router;
