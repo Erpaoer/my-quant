@@ -17,12 +17,19 @@ const UNIMPLEMENTED_SOURCES = new Set([
   "binance-websocket",
 ]);
 const API_TYPES = new Set(["market", "historical", "realtime"]);
-const YAHOO_CHART_URL =
-  "https://query1.finance.yahoo.com/v8/finance/chart/AAPL";
+const YAHOO_CHART_BASE_URL =
+  "https://query1.finance.yahoo.com/v8/finance/chart";
+const YAHOO_HEALTH_CHECK_URL = `${YAHOO_CHART_BASE_URL}/AAPL`;
 const YAHOO_HEADERS = {
   "User-Agent":
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
 };
+
+function yahooChartUrl(symbol: unknown): string {
+  const selected =
+    typeof symbol === "string" && symbol.trim() ? symbol.trim() : "AAPL";
+  return `${YAHOO_CHART_BASE_URL}/${encodeURIComponent(selected)}`;
+}
 
 function normalizeSource(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -202,7 +209,7 @@ router.post("/test-connection", async (req, res) => {
 
   if (source === "yahoo") {
     try {
-      const response = await axios.get(YAHOO_CHART_URL, {
+      const response = await axios.get(YAHOO_HEALTH_CHECK_URL, {
         timeout: 5000,
         headers: YAHOO_HEADERS,
       });
@@ -319,7 +326,7 @@ router.post("/sample", async (req, res) => {
 
   if (source === "yahoo") {
     try {
-      const response = await axios.get(YAHOO_CHART_URL, {
+      const response = await axios.get(yahooChartUrl(symbol), {
         params: { interval: "1d", range: `${limit}d` },
         timeout: 10000,
         headers: YAHOO_HEADERS,
@@ -534,7 +541,7 @@ router.post("/test-api", async (req, res) => {
       let testData: unknown;
 
       if (apiType === "market") {
-        const response = await axios.get(YAHOO_CHART_URL, {
+        const response = await axios.get(yahooChartUrl(symbol), {
           params: { interval: "1d", range: "1d" },
           timeout: 10000,
           headers: YAHOO_HEADERS,
@@ -559,7 +566,7 @@ router.post("/test-api", async (req, res) => {
           };
         }
       } else if (apiType === "historical") {
-        const response = await axios.get(YAHOO_CHART_URL, {
+        const response = await axios.get(yahooChartUrl(symbol), {
           params: { interval: "1d", range: "5d" },
           timeout: 10000,
           headers: YAHOO_HEADERS,
@@ -598,7 +605,7 @@ router.post("/test-api", async (req, res) => {
           testData = { symbol, interval, data, count: data.length };
         }
       } else {
-        const response = await axios.get(YAHOO_CHART_URL, {
+        const response = await axios.get(yahooChartUrl(symbol), {
           params: { interval: "1m", range: "1d" },
           timeout: 10000,
           headers: YAHOO_HEADERS,

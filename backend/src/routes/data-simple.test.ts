@@ -188,6 +188,53 @@ describe("Yahoo routes", () => {
     expect(response.body).not.toHaveProperty("data");
   });
 
+  it.each([
+    [
+      "sample",
+      "/sample",
+      { source: "yahoo", symbol: "MSFT", limit: 5 },
+    ],
+    [
+      "market API",
+      "/test-api",
+      {
+        source: "yahoo",
+        apiType: "market",
+        symbol: "MSFT",
+        interval: "1d",
+      },
+    ],
+    [
+      "historical API",
+      "/test-api",
+      {
+        source: "yahoo",
+        apiType: "historical",
+        symbol: "MSFT",
+        interval: "1d",
+      },
+    ],
+    [
+      "realtime API",
+      "/test-api",
+      {
+        source: "yahoo",
+        apiType: "realtime",
+        symbol: "MSFT",
+        interval: "1m",
+      },
+    ],
+  ])("requests the selected Yahoo symbol for %s", async (_name, path, body) => {
+    mockedGet.mockRejectedValueOnce(new Error("socket timeout"));
+
+    await post(path, body);
+
+    expect(mockedGet).toHaveBeenCalledOnce();
+    expect(mockedGet.mock.calls[0][0]).toBe(
+      "https://query1.finance.yahoo.com/v8/finance/chart/MSFT",
+    );
+  });
+
   it("never logs the incoming Authorization header", async () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     mockedGet.mockResolvedValueOnce({
