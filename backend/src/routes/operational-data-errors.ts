@@ -17,6 +17,7 @@ interface ErrorDetails {
   retryable?: boolean;
   upstreamStatus?: number;
   successor?: string;
+  data?: never;
 }
 
 interface ClassifiedFailure {

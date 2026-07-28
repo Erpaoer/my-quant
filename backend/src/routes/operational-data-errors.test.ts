@@ -23,6 +23,13 @@ function responseDouble() {
   };
 }
 
+function assertOperationalErrorDetailsRejectData(response: Response) {
+  const details = { source: "database", data: [] };
+
+  // @ts-expect-error Operational error details must never include data.
+  sendOperationalDataError(response, 502, "NO_DATA", "No data", details);
+}
+
 describe("classifyUpstreamFailure", () => {
   it.each([
     [401, 503, "SOURCE_AUTH_FAILED", false],
