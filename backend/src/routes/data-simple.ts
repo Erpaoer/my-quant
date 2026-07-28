@@ -17,6 +17,7 @@ const UNIMPLEMENTED_SOURCES = new Set([
   "binance-websocket",
 ]);
 const API_TYPES = new Set(["market", "historical", "realtime"]);
+const HISTORICAL_INTERVALS = new Set(["1m", "5m", "15m", "1h", "1d"]);
 const YAHOO_CHART_BASE_URL =
   "https://query1.finance.yahoo.com/v8/finance/chart";
 const YAHOO_HEALTH_CHECK_URL = `${YAHOO_CHART_BASE_URL}/AAPL`;
@@ -514,6 +515,18 @@ router.post("/test-api", async (req, res) => {
   }
 
   const interval = req.body?.interval;
+  if (
+    apiType === "historical" &&
+    (typeof interval !== "string" || !HISTORICAL_INTERVALS.has(interval))
+  ) {
+    return sendOperationalDataError(
+      res,
+      400,
+      "INVALID_REQUEST",
+      "Historical interval must be 1m, 5m, 15m, 1h, or 1d",
+      { source },
+    );
+  }
 
   if (source === "binance") {
     try {
@@ -544,18 +557,12 @@ router.post("/test-api", async (req, res) => {
           };
         }
       } else if (apiType === "historical") {
-        const intervalMap: Record<string, string> = {
-          "1m": "1m",
-          "5m": "5m",
-          "1h": "1h",
-          "1d": "1d",
-        };
         const response = await axios.get(
           "https://api.binance.com/api/v3/klines",
           {
             params: {
               symbol,
-              interval: intervalMap[interval] || "1h",
+              interval,
               limit: 10,
             },
             timeout: 10000,
@@ -649,7 +656,7 @@ router.post("/test-api", async (req, res) => {
         }
       } else if (apiType === "historical") {
         const response = await axios.get(yahooChartUrl(symbol), {
-          params: { interval: "1d", range: "5d" },
+          params: { interval, range: "5d" },
           timeout: 10000,
           headers: YAHOO_HEADERS,
         });
@@ -712,12 +719,22 @@ router.post("/test-api", async (req, res) => {
     }
   }
 
-  if (apiType !== "historical" || interval !== "1d") {
+  if (apiType !== "historical") {
+    return sendOperationalDataError(
+      res,
+      501,
+      "SOURCE_NOT_IMPLEMENTED",
+      `Tushare Pro does not implement ${apiType} API tests`,
+      { source, retryable: false },
+    );
+  }
+
+  if (interval !== "1d") {
     return sendOperationalDataError(
       res,
       400,
-      "INVALID_API_TYPE",
-      "Tushare Pro supports historical daily data only",
+      "INVALID_REQUEST",
+      "Tushare Pro historical interval must be 1d",
       { source },
     );
   }

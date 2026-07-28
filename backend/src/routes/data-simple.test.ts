@@ -314,6 +314,51 @@ describe("Yahoo routes", () => {
     expect(response.body).not.toHaveProperty("data");
   });
 
+  it.each(["1m", "5m", "15m", "1h", "1d"])(
+    "uses and reports the selected Yahoo historical interval %s",
+    async (interval) => {
+      mockedGet.mockResolvedValueOnce({
+        status: 200,
+        statusText: "OK",
+        headers: {},
+        data: {
+          chart: {
+            result: [
+              {
+                timestamp: [1_700_000_000],
+                indicators: {
+                  quote: [
+                    {
+                      open: [1],
+                      high: [2],
+                      low: [0.5],
+                      close: [1.5],
+                      volume: [10],
+                    },
+                  ],
+                },
+              },
+            ],
+            error: null,
+          },
+        },
+      });
+
+      const response = await post("/test-api", {
+        source: "yahoo",
+        apiType: "historical",
+        symbol: "AAPL",
+        interval,
+      });
+
+      expect(response.status).toBe(200);
+      expect(mockedGet.mock.calls[0][1]).toMatchObject({
+        params: { interval },
+      });
+      expect(response.body.data.interval).toBe(interval);
+    },
+  );
+
   it("rejects a Yahoo market snapshot unless every value is finite", async () => {
     mockedGet.mockResolvedValueOnce({
       status: 200,
@@ -505,6 +550,32 @@ describe("source validation", () => {
     expect(mockedGet).not.toHaveBeenCalled();
     expect(random).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["binance", "BTCUSDT", undefined],
+    ["binance", "BTCUSDT", "30m"],
+    ["yahoo", "AAPL", undefined],
+    ["yahoo", "AAPL", "30m"],
+  ])(
+    "rejects an invalid %s historical interval before provider access",
+    async (source, symbol, interval) => {
+      const response = await post("/test-api", {
+        source,
+        apiType: "historical",
+        symbol,
+        interval,
+      });
+
+      expect(response.status).toBe(400);
+      expect(response.body).toMatchObject({
+        success: false,
+        code: "INVALID_REQUEST",
+        source,
+      });
+      expect(response.body).not.toHaveProperty("data");
+      expect(mockedGet).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([
     [
@@ -790,6 +861,31 @@ describe("Binance routes", () => {
     expect(response.body).not.toHaveProperty("data");
   });
 
+  it.each(["1m", "5m", "15m", "1h", "1d"])(
+    "uses and reports the selected Binance historical interval %s",
+    async (interval) => {
+      mockedGet.mockResolvedValueOnce({
+        status: 200,
+        statusText: "OK",
+        headers: {},
+        data: [[1_700_000_000_000, "1", "2", "0.5", "1.5", "10"]],
+      });
+
+      const response = await post("/test-api", {
+        source: "binance",
+        apiType: "historical",
+        symbol: "BTCUSDT",
+        interval,
+      });
+
+      expect(response.status).toBe(200);
+      expect(mockedGet.mock.calls[0][1]).toMatchObject({
+        params: { interval },
+      });
+      expect(response.body.data.interval).toBe(interval);
+    },
+  );
+
   it.each(["market", "historical", "realtime"])(
     "returns an operational error for a %s API upstream failure",
     async (apiType) => {
@@ -877,19 +973,39 @@ describe("Binance routes", () => {
 });
 
 describe("Tushare API test route", () => {
-  it("rejects real-time mode instead of returning generated success data", async () => {
+  it.each(["market", "realtime"])(
+    "returns 501 for the unimplemented %s capability",
+    async (apiType) => {
+      const response = await post("/test-api", {
+        source: "tushare",
+        apiType,
+        symbol: "000001.SZ",
+        interval: "1d",
+      });
+
+      expect(response.status).toBe(501);
+      expect(response.body).toMatchObject({
+        success: false,
+        code: "SOURCE_NOT_IMPLEMENTED",
+        source: "tushare",
+        retryable: false,
+      });
+      expect(response.body).not.toHaveProperty("data");
+    },
+  );
+
+  it("rejects a non-daily historical interval as an invalid request", async () => {
     const response = await post("/test-api", {
       source: "tushare",
-      apiType: "realtime",
+      apiType: "historical",
       symbol: "000001.SZ",
-      interval: "1d",
+      interval: "1h",
     });
 
     expect(response.status).toBe(400);
     expect(response.body).toMatchObject({
       success: false,
-      code: "INVALID_API_TYPE",
-      message: "Tushare Pro supports historical daily data only",
+      code: "INVALID_REQUEST",
       source: "tushare",
     });
     expect(response.body).not.toHaveProperty("data");
