@@ -93,6 +93,8 @@ describe("sendOperationalDataError", () => {
       success: true,
       code: "INTERNAL_ERROR",
       message: "spoofed",
+      data: [{ fabricated: true }],
+      unexpected: "leaked",
     } as unknown as Parameters<typeof sendOperationalDataError>[4];
 
     sendOperationalDataError(
@@ -103,11 +105,38 @@ describe("sendOperationalDataError", () => {
       maliciousDetails,
     );
 
-    expect(json).toHaveBeenCalledWith({
+    const body = json.mock.calls[0][0];
+    expect(body).toMatchObject({
       source: "database",
       success: false,
       code: "NO_DATA",
       message: "No usable market data was returned",
+    });
+    expect(
+      ["data", "unexpected"].filter((key) =>
+        Object.prototype.hasOwnProperty.call(body, key),
+      ),
+    ).toEqual([]);
+  });
+
+  it("preserves defined whitelisted details", () => {
+    const { json, response } = responseDouble();
+
+    sendOperationalDataError(response, 502, "NO_DATA", "No data", {
+      source: "",
+      retryable: false,
+      upstreamStatus: 0,
+      successor: "",
+    });
+
+    expect(json).toHaveBeenCalledWith({
+      source: "",
+      retryable: false,
+      upstreamStatus: 0,
+      successor: "",
+      success: false,
+      code: "NO_DATA",
+      message: "No data",
     });
   });
 });

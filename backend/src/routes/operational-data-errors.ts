@@ -70,7 +70,16 @@ export function sendOperationalDataError(
   details: ErrorDetails = {},
 ) {
   return res.status(status).json({
-    ...details,
+    ...(details.source === undefined ? {} : { source: details.source }),
+    ...(details.retryable === undefined
+      ? {}
+      : { retryable: details.retryable }),
+    ...(details.upstreamStatus === undefined
+      ? {}
+      : { upstreamStatus: details.upstreamStatus }),
+    ...(details.successor === undefined
+      ? {}
+      : { successor: details.successor }),
     success: false,
     code,
     message,
