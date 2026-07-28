@@ -1,13 +1,24 @@
 # Runtime gaps after P0 stabilization
 
-The project now compiles and its current automated smoke checks pass, but the
-following areas are still prototypes or intentionally non-persistent.
+The project now compiles and its current automated smoke checks pass.
+
+## Resolved in truthful market-data tranche
+
+- The active `/data-test/{test-connection,sample,test-api}` routes now return
+  only real Binance, Yahoo, or Tushare results, or stable operational errors.
+- Primary `/data/market`, `/data/market/:symbol`, `/data/overview`, and
+  `/data/historical` responses now come only from DataManager adapters or the
+  database. Empty external market-data results return `NO_DATA`.
+- Legacy `/data/{test-connection,sample,test-api}` routes now return `410`, and
+  the active market-data routes no longer contain generated-data helpers.
+
+## Open gaps
 
 - Dashboard assets, profit figures, strategy performance, recent activity, and
-  several system metrics are generated or hard-coded demonstration values.
-- Legacy market-data routes still contain generated sample/history helpers.
-  Tushare daily history is real; unsupported Tushare real-time modes fail
-  explicitly instead of returning generated success data.
+  monitoring/system metrics are generated or hard-coded demonstration values.
+- `frontend/src/views/market/MarketData.vue` still uses `Math.random` to build
+  price cards when its batch market-data request fails. The next tranche must
+  replace this with an empty/error state; frontend mocks are not market data.
 - Risk alerts and trading configuration overrides are runtime-only because the
   checked-in Prisma schema has no `RiskAlert` or `TradingConfig` model. They do
   not survive a backend restart.
@@ -24,4 +35,3 @@ following areas are still prototypes or intentionally non-persistent.
 - Frontend production build succeeds, but Rollup reports a circular chunk
   dependency through `src/api/index.ts`, and the charts/UI chunks exceed 1 MB.
   These are performance and execution-order risks to address in a later tranche.
-
