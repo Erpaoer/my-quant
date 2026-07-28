@@ -25,9 +25,11 @@ The project now compiles and its current automated smoke checks pass.
 - The real-time exchange subscription API is now wired through the exchange
   service, but Bybit WebSocket market-data subscriptions are explicitly
   unsupported by the current adapter.
-- Backtesting has typed persistence and route contracts, but strategy execution,
-  fill modelling, slippage, attribution, and production-grade performance
-  analysis still need dedicated implementation and verification.
+- Backtesting has typed persistence and route contracts, but its current
+  endpoints still return randomly generated demonstration market data, trades,
+  and performance results and cannot be used for strategy evaluation. A real
+  strategy-execution loop, fill/slippage modelling, attribution, and
+  production-grade performance analysis remain unimplemented and unverified.
 - Live-order execution and risk controls are not production-ready. Before real
   capital is enabled, add exchange sandbox integration tests, idempotent order
   handling, reconciliation, durable risk configuration, and audited secrets
