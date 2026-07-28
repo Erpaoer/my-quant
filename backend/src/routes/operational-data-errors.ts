@@ -17,6 +17,9 @@ interface ErrorDetails {
   retryable?: boolean;
   upstreamStatus?: number;
   successor?: string;
+  success?: never;
+  code?: never;
+  message?: never;
   data?: never;
 }
 
@@ -67,10 +70,10 @@ export function sendOperationalDataError(
   details: ErrorDetails = {},
 ) {
   return res.status(status).json({
+    ...details,
     success: false,
     code,
     message,
-    ...details,
   });
 }
 

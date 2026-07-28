@@ -23,11 +23,20 @@ function responseDouble() {
   };
 }
 
-function assertOperationalErrorDetailsRejectData(response: Response) {
-  const details = { source: "database", data: [] };
+function assertOperationalErrorDetailsRejectReservedFields(response: Response) {
+  const successDetails = { source: "database", success: true };
+  const codeDetails = { source: "database", code: "INTERNAL_ERROR" };
+  const messageDetails = { source: "database", message: "spoofed" };
+  const dataDetails = { source: "database", data: [] };
 
+  // @ts-expect-error Operational error details must never include success.
+  sendOperationalDataError(response, 502, "NO_DATA", "No data", successDetails);
+  // @ts-expect-error Operational error details must never include code.
+  sendOperationalDataError(response, 502, "NO_DATA", "No data", codeDetails);
+  // @ts-expect-error Operational error details must never include message.
+  sendOperationalDataError(response, 502, "NO_DATA", "No data", messageDetails);
   // @ts-expect-error Operational error details must never include data.
-  sendOperationalDataError(response, 502, "NO_DATA", "No data", details);
+  sendOperationalDataError(response, 502, "NO_DATA", "No data", dataDetails);
 }
 
 describe("classifyUpstreamFailure", () => {
@@ -75,6 +84,31 @@ describe("sendOperationalDataError", () => {
       retryable: false,
     });
     expect(json.mock.calls[0][0]).not.toHaveProperty("data");
+  });
+
+  it("does not let coerced details override stable fields", () => {
+    const { json, response } = responseDouble();
+    const maliciousDetails = {
+      source: "database",
+      success: true,
+      code: "INTERNAL_ERROR",
+      message: "spoofed",
+    } as unknown as Parameters<typeof sendOperationalDataError>[4];
+
+    sendOperationalDataError(
+      response,
+      502,
+      "NO_DATA",
+      "No usable market data was returned",
+      maliciousDetails,
+    );
+
+    expect(json).toHaveBeenCalledWith({
+      source: "database",
+      success: false,
+      code: "NO_DATA",
+      message: "No usable market data was returned",
+    });
   });
 });
 
