@@ -100,6 +100,60 @@ const supportedSymbols = {
   '399006.SZ': { name: '创业板指', base: '399006', quote: 'SZ', precision: 2 }
 };
 
+interface UsableRealTimeRow {
+  symbol: string;
+  source: string;
+  timestamp: Date;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+function isUsableRealTimeRow(row: unknown): row is UsableRealTimeRow {
+  if (!row || typeof row !== 'object') return false;
+
+  const candidate = row as Record<string, unknown>;
+  if (
+    typeof candidate.symbol !== 'string' ||
+    candidate.symbol.trim() === '' ||
+    typeof candidate.source !== 'string' ||
+    candidate.source.trim() === '' ||
+    !(candidate.timestamp instanceof Date) ||
+    !Number.isFinite(candidate.timestamp.getTime())
+  ) {
+    return false;
+  }
+
+  const numericFields = [
+    candidate.open,
+    candidate.high,
+    candidate.low,
+    candidate.close,
+    candidate.volume
+  ];
+  if (!numericFields.every(value =>
+    typeof value === 'number' && Number.isFinite(value)
+  )) {
+    return false;
+  }
+
+  const open = candidate.open as number;
+  const high = candidate.high as number;
+  const low = candidate.low as number;
+  const close = candidate.close as number;
+  const volume = candidate.volume as number;
+
+  return (
+    open > 0 &&
+    close > 0 &&
+    volume >= 0 &&
+    high >= Math.max(open, close) &&
+    low <= Math.min(open, close)
+  );
+}
+
 // Get market data for single symbol
 router.get('/market/:symbol', optionalAuth, [
   query('interval').optional().isIn(['1m', '5m', '15m', '30m', '1h', '4h', '1d']).withMessage('Invalid interval')
@@ -127,7 +181,9 @@ router.get('/market/:symbol', optionalAuth, [
     await ensureDataManagerInitialized();
     const manager = getDataManager();
     const realTimeData = await manager.fetchRealTimeData([symbol]);
-    const row = realTimeData.find(item => item.symbol === symbol);
+    const row = realTimeData.find(item =>
+      isUsableRealTimeRow(item) && item.symbol === symbol
+    );
 
     if (!row) {
       return sendOperationalDataError(
@@ -191,10 +247,12 @@ router.get('/market', optionalAuth, [
 
     const symbols = req.query.symbols as string || 'BTCUSDT,ETHUSDT';
     const interval = req.query.interval as string || '1h';
-    const symbolList = symbols
-      .split(',')
-      .map(symbol => symbol.trim())
-      .filter(symbol => Boolean(supportedSymbols[symbol]));
+    const symbolList = [...new Set(
+      symbols
+        .split(',')
+        .map(symbol => symbol.trim())
+        .filter(symbol => Boolean(supportedSymbols[symbol]))
+    )];
 
     if (symbolList.length === 0) {
       return sendOperationalDataError(
@@ -214,7 +272,9 @@ router.get('/market', optionalAuth, [
     const realTimeData = await manager.fetchRealTimeData(symbolList);
     const realRowsBySymbol = new Map(
       realTimeData
-        .filter(row => symbolList.includes(row.symbol))
+        .filter(row =>
+          isUsableRealTimeRow(row) && symbolList.includes(row.symbol)
+        )
         .map(row => [row.symbol, row])
     );
     const marketData: Record<string, unknown> = {};
@@ -471,7 +531,9 @@ router.get('/overview', optionalAuth, async (req: AuthRequest, res) => {
     const realTimeData = await manager.fetchRealTimeData(symbolKeys);
     const realRowsBySymbol = new Map(
       realTimeData
-        .filter(row => Boolean(supportedSymbols[row.symbol]))
+        .filter(row =>
+          isUsableRealTimeRow(row) && Boolean(supportedSymbols[row.symbol])
+        )
         .map(row => [row.symbol, row])
     );
     const overview: Record<string, unknown> = {};
@@ -489,7 +551,10 @@ router.get('/overview', optionalAuth, async (req: AuthRequest, res) => {
         low: row.low,
         close: row.close,
         volume: row.volume,
-        source: row.source
+        source: row.source,
+        price: row.close,
+        high24h: row.high,
+        low24h: row.low
       };
     }
 

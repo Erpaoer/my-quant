@@ -249,6 +249,64 @@ describe("primary market data routes", () => {
     expect(body).not.toHaveProperty("data");
   });
 
+  it.each([
+    ["NaN OHLCV", { close: Number.NaN }],
+    ["an invalid timestamp", { timestamp: new Date("invalid") }],
+    ["a blank source", { source: "   " }],
+  ])("rejects a matching row with %s as NO_DATA", async (_label, overrides) => {
+    mocks.fetchRealTimeData.mockResolvedValue([
+      marketRow("BTCUSDT", overrides),
+    ]);
+
+    const { response, body } = await get("/data/market/BTCUSDT");
+
+    expect(response.status).toBe(502);
+    expect(body).toMatchObject({
+      success: false,
+      code: "NO_DATA",
+      source: "configured-adapters",
+    });
+    expect(body).not.toHaveProperty("data");
+  });
+
+  it("filters unusable rows from a batch and reports a real partial result", async () => {
+    mocks.fetchRealTimeData.mockResolvedValue([
+      marketRow("BTCUSDT"),
+      marketRow("ETHUSDT", { close: Number.NaN }),
+      marketRow("SOLUSDT", { source: " " }),
+    ]);
+
+    const { response, body } = await get(
+      "/data/market?symbols=BTCUSDT,ETHUSDT,SOLUSDT",
+    );
+
+    expect(response.status).toBe(200);
+    expect(Object.keys(body.data)).toEqual(["BTCUSDT"]);
+    expect(body.meta).toEqual({
+      requested: 3,
+      returned: 1,
+      partial: true,
+    });
+  });
+
+  it("filters unusable rows from the overview and reports a real partial result", async () => {
+    mocks.fetchRealTimeData.mockResolvedValue([
+      marketRow("BTCUSDT"),
+      marketRow("ETHUSDT", { timestamp: new Date("invalid") }),
+      marketRow("BNBUSDT", { source: " " }),
+    ]);
+
+    const { response, body } = await get("/data/overview");
+
+    expect(response.status).toBe(200);
+    expect(Object.keys(body.data)).toEqual(["BTCUSDT"]);
+    expect(body.meta).toEqual({
+      requested: supportedSymbols.length,
+      returned: 1,
+      partial: true,
+    });
+  });
+
   it("uses the shared safe upstream error contract for manager failures", async () => {
     mocks.fetchRealTimeData.mockRejectedValue(
       new Error("secret upstream credential"),
@@ -269,7 +327,12 @@ describe("primary market data routes", () => {
   it("trims and filters batch symbols, returning only requested real rows", async () => {
     mocks.fetchRealTimeData.mockResolvedValue([
       marketRow("BTCUSDT"),
-      marketRow("ETHUSDT", { close: 205, high: 210, low: 190 }),
+      marketRow("ETHUSDT", {
+        open: 200,
+        close: 205,
+        high: 210,
+        low: 190,
+      }),
       marketRow("BNBUSDT"),
     ]);
 
@@ -334,6 +397,22 @@ describe("primary market data routes", () => {
     expect(body).not.toHaveProperty("data");
   });
 
+  it("deduplicates repeated batch symbols before fetching and reporting meta", async () => {
+    mocks.fetchRealTimeData.mockResolvedValue([marketRow("BTCUSDT")]);
+
+    const { response, body } = await get(
+      "/data/market?symbols=BTCUSDT,BTCUSDT",
+    );
+
+    expect(response.status).toBe(200);
+    expect.soft(mocks.fetchRealTimeData).toHaveBeenCalledWith(["BTCUSDT"]);
+    expect.soft(body.meta).toEqual({
+      requested: 1,
+      returned: 1,
+      partial: false,
+    });
+  });
+
   it("returns a partial overview made only from real rows", async () => {
     mocks.fetchRealTimeData.mockResolvedValue([
       marketRow("BTCUSDT"),
@@ -364,6 +443,30 @@ describe("primary market data routes", () => {
       returned: 1,
       partial: true,
     });
+  });
+
+  it("adds overview aliases only from the real close, high, and low", async () => {
+    mocks.fetchRealTimeData.mockResolvedValue([
+      marketRow("BTCUSDT", {
+        close: 104,
+        high: 112,
+        low: 88,
+      }),
+    ]);
+
+    const { response, body } = await get("/data/overview");
+
+    expect(response.status).toBe(200);
+    expect(body.data.BTCUSDT).toMatchObject({
+      close: 104,
+      high: 112,
+      low: 88,
+      price: 104,
+      high24h: 112,
+      low24h: 88,
+    });
+    expect(body.data.BTCUSDT).not.toHaveProperty("change");
+    expect(body.data.BTCUSDT).not.toHaveProperty("marketCap");
   });
 
   it("returns NO_DATA when the overview has no real rows", async () => {
