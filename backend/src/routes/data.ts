@@ -16,6 +16,10 @@ import {
   HistoricalDataRequest
 } from '../services/data';
 import config from '../config';
+import {
+  sendOperationalDataError,
+  sendUpstreamDataError
+} from './operational-data-errors';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -120,24 +124,37 @@ router.get('/market/:symbol', optionalAuth, [
       });
     }
 
-    // Generate mock market data for the symbol
-    const basePrice = getBasePrice(symbol);
-    const currentPrice = basePrice + (Math.random() - 0.5) * basePrice * 0.02;
-    const prevClose = basePrice;
-    const change = currentPrice - prevClose;
-    const changePercent = (change / prevClose) * 100;
+    await ensureDataManagerInitialized();
+    const manager = getDataManager();
+    const realTimeData = await manager.fetchRealTimeData([symbol]);
+    const row = realTimeData.find(item => item.symbol === symbol);
+
+    if (!row) {
+      return sendOperationalDataError(
+        res,
+        502,
+        'NO_DATA',
+        'No real market data available for the requested symbol',
+        {
+          source: 'configured-adapters',
+          retryable: false
+        }
+      );
+    }
 
     const marketData = {
       symbol,
       ...supportedSymbols[symbol],
-      price: currentPrice,
-      prevClose,
-      change,
-      changePercent,
-      volume: Math.floor(Math.random() * 1000000),
-      high24h: currentPrice * 1.02,
-      low24h: currentPrice * 0.98,
-      timestamp: new Date(),
+      timestamp: row.timestamp,
+      open: row.open,
+      high: row.high,
+      low: row.low,
+      close: row.close,
+      volume: row.volume,
+      source: row.source,
+      price: row.close,
+      high24h: row.high,
+      low24h: row.low,
       interval
     };
 
@@ -148,11 +165,12 @@ router.get('/market/:symbol', optionalAuth, [
     });
   } catch (error) {
     console.error('Error fetching market data:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch market data',
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
+    return sendUpstreamDataError(
+      res,
+      'configured-adapters',
+      error,
+      'Failed to fetch real market data'
+    );
   }
 });
 
@@ -173,47 +191,87 @@ router.get('/market', optionalAuth, [
 
     const symbols = req.query.symbols as string || 'BTCUSDT,ETHUSDT';
     const interval = req.query.interval as string || '1h';
-    const symbolList = symbols.split(',');
+    const symbolList = symbols
+      .split(',')
+      .map(symbol => symbol.trim())
+      .filter(symbol => Boolean(supportedSymbols[symbol]));
 
-    // Generate mock market data for requested symbols
-    const marketData = {};
-    
-    for (const symbol of symbolList) {
-      if (supportedSymbols[symbol]) {
-        const basePrice = getBasePrice(symbol);
-        const currentPrice = basePrice + (Math.random() - 0.5) * basePrice * 0.02;
-        const prevClose = basePrice;
-        const change = currentPrice - prevClose;
-        const changePercent = (change / prevClose) * 100;
-
-        marketData[symbol] = {
-          symbol,
-          ...supportedSymbols[symbol],
-          price: currentPrice,
-          prevClose,
-          change,
-          changePercent,
-          volume: Math.floor(Math.random() * 1000000),
-          high24h: currentPrice * 1.02,
-          low24h: currentPrice * 0.98,
-          timestamp: new Date(),
-          interval
-        };
-      }
+    if (symbolList.length === 0) {
+      return sendOperationalDataError(
+        res,
+        400,
+        'INVALID_REQUEST',
+        'At least one supported symbol is required',
+        {
+          source: 'configured-adapters',
+          retryable: false
+        }
+      );
     }
 
-    res.json({
+    await ensureDataManagerInitialized();
+    const manager = getDataManager();
+    const realTimeData = await manager.fetchRealTimeData(symbolList);
+    const realRowsBySymbol = new Map(
+      realTimeData
+        .filter(row => symbolList.includes(row.symbol))
+        .map(row => [row.symbol, row])
+    );
+    const marketData: Record<string, unknown> = {};
+
+    for (const symbol of symbolList) {
+      const row = realRowsBySymbol.get(symbol);
+      if (!row || marketData[symbol]) continue;
+
+      marketData[symbol] = {
+        symbol,
+        ...supportedSymbols[symbol],
+        timestamp: row.timestamp,
+        open: row.open,
+        high: row.high,
+        low: row.low,
+        close: row.close,
+        volume: row.volume,
+        source: row.source,
+        price: row.close,
+        high24h: row.high,
+        low24h: row.low,
+        interval
+      };
+    }
+
+    const returned = Object.keys(marketData).length;
+    if (returned === 0) {
+      return sendOperationalDataError(
+        res,
+        502,
+        'NO_DATA',
+        'No real market data available for the requested symbols',
+        {
+          source: 'configured-adapters',
+          retryable: false
+        }
+      );
+    }
+
+    return res.json({
       success: true,
       message: 'Market data retrieved successfully',
-      data: marketData
+      data: marketData,
+      meta: {
+        requested: symbolList.length,
+        returned,
+        partial: returned < symbolList.length
+      }
     });
   } catch (error) {
     console.error('Error fetching market data:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch market data',
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
+    return sendUpstreamDataError(
+      res,
+      'configured-adapters',
+      error,
+      'Failed to fetch real market data'
+    );
   }
 });
 
@@ -236,6 +294,7 @@ router.get('/historical', optionalAuth, [
     }
 
     const { symbol, interval = '1h', startTime, endTime, limit = 100 } = req.query;
+    const requestedLimit = Number(limit);
 
     if (!supportedSymbols[symbol as string]) {
       return res.status(400).json({
@@ -250,29 +309,19 @@ router.get('/historical', optionalAuth, [
       interval as string,
       startTime ? new Date(startTime as string) : undefined,
       endTime ? new Date(endTime as string) : undefined,
-      limit as number
+      requestedLimit
     );
 
-    // If not enough data in database, generate mock data
-    let historicalData: Array<{
-      timestamp: Date;
-      open: number;
-      high: number;
-      low: number;
-      close: number;
-      volume: number | null;
-      interval: string;
-      symbol?: string;
-      id?: string;
-      source?: string;
-    }> = dbData;
-    if (historicalData.length < (limit as number)) {
-      historicalData = generateMockHistoricalData(
-        symbol as string,
-        interval as string,
-        startTime ? new Date(startTime as string) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
-        endTime ? new Date(endTime as string) : new Date(),
-        limit as number
+    if (dbData.length === 0) {
+      return sendOperationalDataError(
+        res,
+        502,
+        'NO_DATA',
+        'No historical data available in the database',
+        {
+          source: 'database',
+          retryable: false
+        }
       );
     }
 
@@ -282,17 +331,26 @@ router.get('/historical', optionalAuth, [
       data: {
         symbol,
         interval,
-        data: historicalData,
-        count: historicalData.length
+        data: dbData,
+        count: dbData.length,
+        requested: requestedLimit,
+        returned: dbData.length,
+        source: 'database',
+        partial: dbData.length < requestedLimit
       }
     });
   } catch (error) {
     console.error('Error fetching historical data:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to fetch historical data',
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
+    return sendOperationalDataError(
+      res,
+      500,
+      'INTERNAL_ERROR',
+      'Failed to fetch historical data',
+      {
+        source: 'database',
+        retryable: false
+      }
+    );
   }
 });
 
@@ -407,40 +465,66 @@ router.get('/symbols', optionalAuth, async (req: AuthRequest, res) => {
 // Get market overview
 router.get('/overview', optionalAuth, async (req: AuthRequest, res) => {
   try {
-    const overview = {};
     const symbolKeys = Object.keys(supportedSymbols);
+    await ensureDataManagerInitialized();
+    const manager = getDataManager();
+    const realTimeData = await manager.fetchRealTimeData(symbolKeys);
+    const realRowsBySymbol = new Map(
+      realTimeData
+        .filter(row => Boolean(supportedSymbols[row.symbol]))
+        .map(row => [row.symbol, row])
+    );
+    const overview: Record<string, unknown> = {};
 
     for (const symbol of symbolKeys) {
-      const basePrice = getBasePrice(symbol);
-      const currentPrice = basePrice + (Math.random() - 0.5) * basePrice * 0.01;
-      const prevClose = basePrice;
-      const change = currentPrice - prevClose;
-      const changePercent = (change / prevClose) * 100;
+      const row = realRowsBySymbol.get(symbol);
+      if (!row) continue;
 
       overview[symbol] = {
         symbol,
         name: supportedSymbols[symbol].name,
-        price: currentPrice,
-        change,
-        changePercent,
-        volume: Math.floor(Math.random() * 1000000),
-        marketCap: Math.floor(currentPrice * Math.random() * 1000000000),
-        timestamp: new Date()
+        timestamp: row.timestamp,
+        open: row.open,
+        high: row.high,
+        low: row.low,
+        close: row.close,
+        volume: row.volume,
+        source: row.source
       };
     }
 
-    res.json({
+    const returned = Object.keys(overview).length;
+    if (returned === 0) {
+      return sendOperationalDataError(
+        res,
+        502,
+        'NO_DATA',
+        'No real market data available for the overview',
+        {
+          source: 'configured-adapters',
+          retryable: false
+        }
+      );
+    }
+
+    return res.json({
       success: true,
       message: 'Market overview retrieved successfully',
-      data: overview
+      data: overview,
+      meta: {
+        requested: symbolKeys.length,
+        returned,
+        partial: returned < symbolKeys.length
+      }
     });
   } catch (error) {
     console.error('Error fetching market overview:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch market overview',
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
+    return sendUpstreamDataError(
+      res,
+      'configured-adapters',
+      error,
+      'Failed to fetch real market overview'
+    );
   }
 });
 
