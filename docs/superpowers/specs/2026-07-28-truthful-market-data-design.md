@@ -8,11 +8,19 @@ Make every mounted operational market-data endpoint truthful: it must return dat
 
 ## Scope
 
-This iteration covers the currently mounted routes that still synthesize successful market data:
+This iteration covers the currently mounted routes that synthesize successful market data or convert an empty real-source result into a successful operational response:
 
 - `GET /data/market/:symbol`
 - `GET /data/market`
 - `GET /data/historical`
+- `GET /data/overview`
+- `GET /data/external/realtime`
+- `POST /data/external/historical`
+- `GET /data/external/quick/:symbol`
+- `POST /data/test-connection` (legacy duplicate)
+- `POST /data/sample` (legacy duplicate)
+- `POST /data/test-api` (legacy duplicate)
+- `POST /data-test/test-connection`
 - `POST /data-test/sample`
 - `POST /data-test/test-api`
 
@@ -41,6 +49,8 @@ A full adapter-registry rewrite is deferred because it would mix architectural m
 - If no connected adapter returns a usable record, the route returns an explicit non-2xx `NO_DATA` or upstream failure response.
 - These handlers do not call random-number or market-data generator helpers.
 
+`GET /data/overview` uses the same real records for the configured symbol catalog. Static symbol names remain valid metadata, but price, volume, change, and market-cap values are not invented. Missing symbols are reported through `requested`, `returned`, and `partial` metadata; a completely empty result is an error.
+
 ### Historical route
 
 `GET /data/historical` continues to query persisted `marketData` records.
@@ -55,7 +65,7 @@ This iteration does not silently choose an upstream provider to fill a database 
 
 ### Data-source sample and API-test routes
 
-`POST /data-test/sample` and `POST /data-test/test-api` retain only real implementations.
+`POST /data-test/test-connection`, `POST /data-test/sample`, and `POST /data-test/test-api` retain only real implementations.
 
 - Binance uses its real public HTTP endpoints.
 - Yahoo Finance uses its real adapter/request path.
@@ -63,6 +73,14 @@ This iteration does not silently choose an upstream provider to fill a database 
 - A recognized source whose requested operation is not implemented returns `501 SOURCE_NOT_IMPLEMENTED`.
 - An unknown source or invalid API type returns `400 INVALID_SOURCE` or `400 INVALID_API_TYPE`.
 - Upstream failures never fall back to generated samples.
+
+### Existing external-source routes
+
+The already-real `GET /data/external/realtime`, `POST /data/external/historical`, and `GET /data/external/quick/:symbol` routes keep their current adapters and successful response data. If their adapters return no usable records, they return `502 NO_DATA` instead of a successful empty payload.
+
+### Legacy duplicate routes
+
+The duplicate `POST /data/test-connection`, `POST /data/sample`, and `POST /data/test-api` handlers are not used by the active frontend and contain a second independent set of generators. They return `410 LEGACY_ENDPOINT_DEPRECATED` with the matching `/data-test/*` successor path. This avoids maintaining two implementations and ensures old callers cannot receive generated data.
 
 ## Error contract
 
@@ -83,6 +101,7 @@ The `data` property is omitted on failures. Responses and logs never include con
 Error classification:
 
 - `400 INVALID_REQUEST`, `INVALID_SOURCE`, or `INVALID_API_TYPE`: malformed or unknown input.
+- `410 LEGACY_ENDPOINT_DEPRECATED`: duplicate endpoint with an explicit truthful successor.
 - `501 SOURCE_NOT_IMPLEMENTED`: known source or operation without a real implementation.
 - `502 SOURCE_UNREACHABLE` or `NO_DATA`: timeout, invalid upstream response, or no usable result.
 - `503 SOURCE_AUTH_FAILED` or `SOURCE_RATE_LIMITED`: upstream permission, availability, or throttling problem.
@@ -97,8 +116,12 @@ Development follows red-green-refactor.
 - Add route tests before implementation changes.
 - Verify real adapter success is returned unchanged and includes real source metadata.
 - Verify empty real-time results are non-2xx and contain no generated data.
+- Verify the overview returns only adapter records, reports partial coverage, and fails when completely empty.
 - Verify historical database rows are preserved when fewer than requested and are marked partial.
 - Verify an empty historical query returns `NO_DATA`.
+- Verify empty external real-time, historical, and quick-fetch results return `NO_DATA`.
+- Verify the three legacy duplicate routes return `410` and their `/data-test/*` successor.
+- Verify unsupported connection tests do not report a generated connected state.
 - Verify Binance timeout, `403`, `429`, and `5xx` paths never return successful fallback samples.
 - Verify unsupported OKX/Huobi operations return `501`.
 - Verify unknown sources and invalid API types return `400`.
