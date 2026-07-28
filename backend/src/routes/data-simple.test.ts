@@ -121,6 +121,26 @@ describe("Yahoo routes", () => {
     expect(response.body).not.toHaveProperty("data");
   });
 
+  it("classifies a Yahoo upstream 404 as no data", async () => {
+    mockedGet.mockRejectedValueOnce(upstreamFailure(404));
+
+    const response = await post("/sample", {
+      source: "yahoo",
+      symbol: "AAPL",
+      limit: 5,
+    });
+
+    expect(response.status).toBe(502);
+    expect(response.body).toMatchObject({
+      success: false,
+      code: "NO_DATA",
+      source: "yahoo",
+      retryable: false,
+      upstreamStatus: 404,
+    });
+    expect(response.body).not.toHaveProperty("data");
+  });
+
   it("classifies malformed Yahoo sample records as no data", async () => {
     mockedGet.mockResolvedValueOnce({
       status: 200,
@@ -186,6 +206,201 @@ describe("Yahoo routes", () => {
       source: "yahoo",
     });
     expect(response.body).not.toHaveProperty("data");
+  });
+
+  it.each([
+    [
+      "null",
+      {
+        open: [null],
+        high: [2],
+        low: [0.5],
+        close: [1.5],
+        volume: [10],
+      },
+    ],
+    [
+      "NaN",
+      {
+        open: [1],
+        high: ["NaN"],
+        low: [0.5],
+        close: [1.5],
+        volume: [10],
+      },
+    ],
+    [
+      "missing",
+      {
+        open: [1],
+        high: [2],
+        low: [0.5],
+        close: [1.5],
+      },
+    ],
+  ])("drops a Yahoo sample row with a %s OHLCV field", async (_case, quote) => {
+    mockedGet.mockResolvedValueOnce({
+      status: 200,
+      statusText: "OK",
+      headers: {},
+      data: {
+        chart: {
+          result: [
+            {
+              timestamp: [1_700_000_000],
+              indicators: { quote: [quote] },
+            },
+          ],
+          error: null,
+        },
+      },
+    });
+
+    const response = await post("/sample", {
+      source: "yahoo",
+      symbol: "AAPL",
+      limit: 5,
+    });
+
+    expect(response.status).toBe(502);
+    expect(response.body).toMatchObject({
+      success: false,
+      code: "NO_DATA",
+      source: "yahoo",
+    });
+    expect(response.body).not.toHaveProperty("data");
+  });
+
+  it("drops an incomplete Yahoo historical row", async () => {
+    mockedGet.mockResolvedValueOnce({
+      status: 200,
+      statusText: "OK",
+      headers: {},
+      data: {
+        chart: {
+          result: [
+            {
+              timestamp: [1_700_000_000],
+              indicators: {
+                quote: [
+                  {
+                    open: [1],
+                    high: [2],
+                    low: [0.5],
+                    close: [1.5],
+                  },
+                ],
+              },
+            },
+          ],
+          error: null,
+        },
+      },
+    });
+
+    const response = await post("/test-api", {
+      source: "yahoo",
+      apiType: "historical",
+      symbol: "AAPL",
+      interval: "1d",
+    });
+
+    expect(response.status).toBe(502);
+    expect(response.body).toMatchObject({
+      success: false,
+      code: "NO_DATA",
+      source: "yahoo",
+    });
+    expect(response.body).not.toHaveProperty("data");
+  });
+
+  it("rejects a Yahoo market snapshot unless every value is finite", async () => {
+    mockedGet.mockResolvedValueOnce({
+      status: 200,
+      statusText: "OK",
+      headers: {},
+      data: {
+        chart: {
+          result: [
+            {
+              meta: {
+                regularMarketPrice: 100,
+                regularMarketChange: null,
+                regularMarketChangePercent: 1,
+                regularMarketVolume: "NaN",
+                dayHigh: 110,
+              },
+            },
+          ],
+          error: null,
+        },
+      },
+    });
+
+    const response = await post("/test-api", {
+      source: "yahoo",
+      apiType: "market",
+      symbol: "AAPL",
+      interval: "1d",
+    });
+
+    expect(response.status).toBe(502);
+    expect(response.body).toMatchObject({
+      success: false,
+      code: "NO_DATA",
+      source: "yahoo",
+    });
+    expect(response.body).not.toHaveProperty("data");
+  });
+
+  it("keeps Yahoo timestamps aligned with quotes when applying sample limit", async () => {
+    const timestamps = [1_700_000_000, 1_700_000_060, 1_700_000_120];
+    mockedGet.mockResolvedValueOnce({
+      status: 200,
+      statusText: "OK",
+      headers: {},
+      data: {
+        chart: {
+          result: [
+            {
+              timestamp: timestamps,
+              indicators: {
+                quote: [
+                  {
+                    open: [1, 2, 3],
+                    high: [11, 12, 13],
+                    low: [0.1, 0.2, 0.3],
+                    close: [101, 102, 103],
+                    volume: [1001, 1002, 1003],
+                  },
+                ],
+              },
+            },
+          ],
+          error: null,
+        },
+      },
+    });
+
+    const response = await post("/sample", {
+      source: "yahoo",
+      symbol: "AAPL",
+      limit: 2,
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toEqual([
+      expect.objectContaining({
+        timestamp: new Date(timestamps[1] * 1000).toISOString(),
+        close: 102,
+        volume: 1002,
+      }),
+      expect.objectContaining({
+        timestamp: new Date(timestamps[2] * 1000).toISOString(),
+        close: 103,
+        volume: 1003,
+      }),
+    ]);
   });
 
   it.each([
@@ -291,6 +506,130 @@ describe("source validation", () => {
     expect(random).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [
+      "/sample",
+      { source: "binance", symbol: 123, limit: 5 },
+      "binance",
+    ],
+    [
+      "/sample",
+      { source: "yahoo", symbol: "   ", limit: 5 },
+      "yahoo",
+    ],
+    [
+      "/sample",
+      { source: "tushare", symbol: "", limit: 5 },
+      "tushare",
+    ],
+    [
+      "/test-api",
+      {
+        source: "binance",
+        apiType: "market",
+        symbol: " ",
+        interval: "1d",
+      },
+      "binance",
+    ],
+    [
+      "/test-api",
+      {
+        source: "yahoo",
+        apiType: "market",
+        symbol: 123,
+        interval: "1d",
+      },
+      "yahoo",
+    ],
+    [
+      "/test-api",
+      {
+        source: "tushare",
+        apiType: "historical",
+        symbol: " ",
+        interval: "1d",
+      },
+      "tushare",
+    ],
+  ])(
+    "rejects an invalid symbol for %s before provider access",
+    async (path, body, source) => {
+      const response = await post(path, body);
+
+      expect(response.status).toBe(400);
+      expect(response.body).toMatchObject({
+        success: false,
+        code: "INVALID_REQUEST",
+        source,
+      });
+      expect(response.body).not.toHaveProperty("data");
+      expect(mockedGet).not.toHaveBeenCalled();
+    },
+  );
+
+  it("uses one normalized Binance symbol in params and response data", async () => {
+    mockedGet.mockResolvedValueOnce({
+      status: 200,
+      statusText: "OK",
+      headers: {},
+      data: [[1_700_000_000_000, "1", "2", "0.5", "1.5", "10"]],
+    });
+
+    const response = await post("/sample", {
+      source: "binance",
+      symbol: " btcusdt ",
+      limit: 1,
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockedGet.mock.calls[0][1]).toMatchObject({
+      params: { symbol: "BTCUSDT" },
+    });
+    expect(response.body.data[0].symbol).toBe("BTCUSDT");
+  });
+
+  it("uses one normalized Yahoo symbol in the URL and response data", async () => {
+    mockedGet.mockResolvedValueOnce({
+      status: 200,
+      statusText: "OK",
+      headers: {},
+      data: {
+        chart: {
+          result: [
+            {
+              timestamp: [1_700_000_000],
+              indicators: {
+                quote: [
+                  {
+                    open: [1],
+                    high: [2],
+                    low: [0.5],
+                    close: [1.5],
+                    volume: [10],
+                  },
+                ],
+              },
+            },
+          ],
+          error: null,
+        },
+      },
+    });
+
+    const response = await post("/sample", {
+      source: "yahoo",
+      symbol: " msft ",
+      limit: 1,
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockedGet.mock.calls[0][0]).toBe(
+      "https://query1.finance.yahoo.com/v8/finance/chart/MSFT",
+    );
+    expect(response.body.data[0].symbol).toBe("MSFT");
+  });
+
   it.each(["okx", "huobi", "bybit", "binance-websocket"])(
     "returns 501 for the known but unimplemented %s sample source",
     async (source) => {
@@ -384,6 +723,26 @@ describe("Binance routes", () => {
     },
   );
 
+  it("classifies a Binance upstream 400 as an invalid request", async () => {
+    mockedGet.mockRejectedValueOnce(upstreamFailure(400));
+
+    const response = await post("/sample", {
+      source: "binance",
+      symbol: "BTCUSDT",
+      limit: 5,
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({
+      success: false,
+      code: "INVALID_REQUEST",
+      source: "binance",
+      retryable: false,
+      upstreamStatus: 400,
+    });
+    expect(response.body).not.toHaveProperty("data");
+  });
+
   it("rejects a Binance sample row with no usable values", async () => {
     mockedGet.mockResolvedValueOnce({
       status: 200,
@@ -403,6 +762,30 @@ describe("Binance routes", () => {
       success: false,
       code: "NO_DATA",
       source: "binance",
+    });
+    expect(response.body).not.toHaveProperty("data");
+  });
+
+  it("classifies an unrepresentable Binance timestamp as no data", async () => {
+    mockedGet.mockResolvedValueOnce({
+      status: 200,
+      statusText: "OK",
+      headers: {},
+      data: [[1e20, "1", "2", "0.5", "1.5", "10"]],
+    });
+
+    const response = await post("/sample", {
+      source: "binance",
+      symbol: "BTCUSDT",
+      limit: 5,
+    });
+
+    expect(response.status).toBe(502);
+    expect(response.body).toMatchObject({
+      success: false,
+      code: "NO_DATA",
+      source: "binance",
+      retryable: false,
     });
     expect(response.body).not.toHaveProperty("data");
   });

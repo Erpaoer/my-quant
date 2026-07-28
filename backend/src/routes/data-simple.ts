@@ -25,10 +25,8 @@ const YAHOO_HEADERS = {
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
 };
 
-function yahooChartUrl(symbol: unknown): string {
-  const selected =
-    typeof symbol === "string" && symbol.trim() ? symbol.trim() : "AAPL";
-  return `${YAHOO_CHART_BASE_URL}/${encodeURIComponent(selected)}`;
+function yahooChartUrl(symbol: string): string {
+  return `${YAHOO_CHART_BASE_URL}/${encodeURIComponent(symbol)}`;
 }
 
 function normalizeSource(value: unknown): string | undefined {
@@ -74,6 +72,24 @@ function validateSource(res: Response, value: unknown): string | undefined {
   return source;
 }
 
+function validateSymbol(
+  res: Response,
+  source: string,
+  value: unknown,
+): string | undefined {
+  if (typeof value !== "string" || !value.trim()) {
+    sendOperationalDataError(
+      res,
+      400,
+      "INVALID_REQUEST",
+      "Symbol is required",
+      { source },
+    );
+    return undefined;
+  }
+  return value.trim().toUpperCase();
+}
+
 function upstreamStatus(error: unknown): number | undefined {
   if (!error || typeof error !== "object") return undefined;
   const response = (error as { response?: { status?: unknown } }).response;
@@ -94,6 +110,32 @@ function sendNoData(res: Response, source: string, message: string) {
   });
 }
 
+function sendProviderFailure(
+  res: Response,
+  source: string,
+  error: unknown,
+  message: string,
+) {
+  const status = upstreamStatus(error);
+  if (status === 400) {
+    return sendOperationalDataError(
+      res,
+      400,
+      "INVALID_REQUEST",
+      message,
+      { source, retryable: false, upstreamStatus: status },
+    );
+  }
+  if (status === 404) {
+    return sendOperationalDataError(res, 502, "NO_DATA", message, {
+      source,
+      retryable: false,
+      upstreamStatus: status,
+    });
+  }
+  return sendUpstreamDataError(res, source, error, message);
+}
+
 function sendYahooFailure(
   res: Response,
   error: unknown,
@@ -109,7 +151,7 @@ function sendYahooFailure(
       ? "Yahoo Finance is unavailable from the current network"
       : messages[operation];
 
-  return sendUpstreamDataError(res, "yahoo", error, message);
+  return sendProviderFailure(res, "yahoo", error, message);
 }
 
 function finiteNumber(value: unknown): number | undefined {
@@ -123,10 +165,17 @@ function finiteNumber(value: unknown): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+function binanceTimestamp(value: unknown): string | undefined {
+  const milliseconds = finiteNumber(value);
+  if (milliseconds === undefined) return undefined;
+  const date = new Date(milliseconds);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+}
+
 function isUsableKline(value: unknown): value is unknown[] {
   if (!Array.isArray(value) || value.length < 6) return false;
   return (
-    finiteNumber(value[0]) !== undefined &&
+    binanceTimestamp(value[0]) !== undefined &&
     [value[1], value[2], value[3], value[4], value[5]].every(
       (item) => finiteNumber(item) !== undefined,
     )
@@ -135,7 +184,7 @@ function isUsableKline(value: unknown): value is unknown[] {
 
 function mapKline(kline: unknown[]) {
   return {
-    timestamp: new Date(Number(kline[0])).toISOString(),
+    timestamp: binanceTimestamp(kline[0])!,
     open: Number(kline[1]),
     high: Number(kline[2]),
     low: Number(kline[3]),
@@ -149,6 +198,41 @@ function yahooTimestamp(value: unknown): string | undefined {
   if (seconds === undefined) return undefined;
   const date = new Date(seconds * 1000);
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+}
+
+function yahooOhlcvRecord(
+  timestamp: unknown,
+  quotes: unknown,
+  index: number,
+) {
+  const normalizedTimestamp = yahooTimestamp(timestamp);
+  const quote =
+    quotes && typeof quotes === "object"
+      ? (quotes as Record<string, unknown>)
+      : {};
+  const valueAt = (field: string) => {
+    const values = quote[field];
+    return Array.isArray(values) ? finiteNumber(values[index]) : undefined;
+  };
+  const open = valueAt("open");
+  const high = valueAt("high");
+  const low = valueAt("low");
+  const close = valueAt("close");
+  const volume = valueAt("volume");
+  if (
+    !normalizedTimestamp ||
+    [open, high, low, close, volume].some((value) => value === undefined)
+  ) {
+    return undefined;
+  }
+  return {
+    timestamp: normalizedTimestamp,
+    open,
+    high,
+    low,
+    close,
+    volume,
+  };
 }
 
 function limitFrom(value: unknown, defaultLimit = 5): number {
@@ -198,7 +282,7 @@ router.post("/test-connection", async (req, res) => {
         },
       });
     } catch (error) {
-      return sendUpstreamDataError(
+      return sendProviderFailure(
         res,
         source,
         error,
@@ -278,7 +362,8 @@ router.post("/sample", async (req, res) => {
   const source = validateSource(res, req.body?.source);
   if (!source) return;
 
-  const symbol = req.body?.symbol;
+  const symbol = validateSymbol(res, source, req.body?.symbol);
+  if (!symbol) return;
   const limit = limitFrom(req.body?.limit);
 
   if (source === "binance") {
@@ -315,7 +400,7 @@ router.post("/sample", async (req, res) => {
         })),
       });
     } catch (error) {
-      return sendUpstreamDataError(
+      return sendProviderFailure(
         res,
         source,
         error,
@@ -341,29 +426,19 @@ router.post("/sample", async (req, res) => {
         : [];
       const quotes = result?.indicators?.quote?.[0] || {};
       const sampleData = timestamps
-        .slice(-limit)
         .flatMap((timestamp: unknown, index: number) => {
-          const normalizedTimestamp = yahooTimestamp(timestamp);
-          if (
-            !normalizedTimestamp ||
-            finiteNumber(quotes.close?.[index]) === undefined
-          ) {
-            return [];
-          }
+          const record = yahooOhlcvRecord(timestamp, quotes, index);
+          if (!record) return [];
           return [
             {
               symbol,
-              timestamp: normalizedTimestamp,
-              open: quotes.open?.[index] || 0,
-              high: quotes.high?.[index] || 0,
-              low: quotes.low?.[index] || 0,
-              close: quotes.close?.[index] || 0,
-              volume: quotes.volume?.[index] || 0,
+              ...record,
               source,
               qualityScore: 0.95,
             },
           ];
-        });
+        })
+        .slice(-limit);
 
       if (sampleData.length === 0) {
         return sendNoData(
@@ -390,12 +465,14 @@ router.post("/sample", async (req, res) => {
       endTime.getTime() - 45 * 24 * 60 * 60 * 1000,
     );
     const sampleData = await adapter.fetchHistoricalData({
-      symbol: symbol || "000001.SZ",
+      symbol,
       startTime,
       endTime,
       interval: "1d",
     });
-    const selected = sampleData.slice(-Math.max(1, Math.min(limit, 20)));
+    const selected = sampleData
+      .slice(-Math.max(1, Math.min(limit, 20)))
+      .map((record) => ({ ...record, symbol }));
     if (selected.length === 0) {
       return sendNoData(
         res,
@@ -423,6 +500,8 @@ router.post("/test-api", async (req, res) => {
   const source = validateSource(res, req.body?.source);
   if (!source) return;
 
+  const symbol = validateSymbol(res, source, req.body?.symbol);
+  if (!symbol) return;
   const apiType = req.body?.apiType;
   if (typeof apiType !== "string" || !API_TYPES.has(apiType)) {
     return sendOperationalDataError(
@@ -434,7 +513,6 @@ router.post("/test-api", async (req, res) => {
     );
   }
 
-  const symbol = req.body?.symbol;
   const interval = req.body?.interval;
 
   if (source === "binance") {
@@ -527,7 +605,7 @@ router.post("/test-api", async (req, res) => {
         data: testData,
       });
     } catch (error) {
-      return sendUpstreamDataError(
+      return sendProviderFailure(
         res,
         source,
         error,
@@ -551,16 +629,20 @@ router.post("/test-api", async (req, res) => {
         }
 
         const meta = response.data?.chart?.result?.[0]?.meta;
-        const price = finiteNumber(meta?.regularMarketPrice);
-        if (price !== undefined) {
+        const market = {
+          price: finiteNumber(meta?.regularMarketPrice),
+          change24h: finiteNumber(meta?.regularMarketChange),
+          changePercent24h: finiteNumber(meta?.regularMarketChangePercent),
+          volume24h: finiteNumber(meta?.regularMarketVolume),
+          high24h: finiteNumber(meta?.dayHigh),
+          low24h: finiteNumber(meta?.dayLow),
+        };
+        if (
+          Object.values(market).every((value) => value !== undefined)
+        ) {
           testData = {
             symbol,
-            price,
-            change24h: Number(meta.regularMarketChange || 0),
-            changePercent24h: Number(meta.regularMarketChangePercent || 0),
-            volume24h: Number(meta.regularMarketVolume || 0),
-            high24h: Number(meta.dayHigh || 0),
-            low24h: Number(meta.dayLow || 0),
+            ...market,
             timestamp: new Date().toISOString(),
             source: "yahoo-finance-api",
           };
@@ -582,23 +664,8 @@ router.post("/test-api", async (req, res) => {
         const quotes = result?.indicators?.quote?.[0] || {};
         const data = timestamps.flatMap(
           (timestamp: unknown, index: number) => {
-            const normalizedTimestamp = yahooTimestamp(timestamp);
-            if (
-              !normalizedTimestamp ||
-              finiteNumber(quotes.close?.[index]) === undefined
-            ) {
-              return [];
-            }
-            return [
-              {
-                timestamp: normalizedTimestamp,
-                open: quotes.open?.[index] || 0,
-                high: quotes.high?.[index] || 0,
-                low: quotes.low?.[index] || 0,
-                close: quotes.close?.[index] || 0,
-                volume: quotes.volume?.[index] || 0,
-              },
-            ];
+            const record = yahooOhlcvRecord(timestamp, quotes, index);
+            return record ? [record] : [];
           },
         );
         if (data.length > 0) {
@@ -661,7 +728,7 @@ router.post("/test-api", async (req, res) => {
     const startTime = new Date(endTime);
     startTime.setUTCDate(startTime.getUTCDate() - 30);
     const data = await adapter.fetchHistoricalData({
-      symbol: symbol || "000001.SZ",
+      symbol,
       interval: "1d",
       startTime,
       endTime,
@@ -677,7 +744,7 @@ router.post("/test-api", async (req, res) => {
     return res.json({
       success: true,
       message: "Real Tushare Pro daily data retrieved successfully",
-      data,
+      data: data.map((record) => ({ ...record, symbol })),
     });
   } catch (error) {
     return sendUpstreamDataError(
